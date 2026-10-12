@@ -54,37 +54,69 @@ inline const QString kMenuQuit            = QStringLiteral("退出(&Q)");
 inline const QString kMenuHelp            = QStringLiteral("帮助(&H)");
 inline const QString kMenuAbout           = QStringLiteral("关于(&A)");
 
-// ── 驱动器列表 ──
-inline const QString kDriveTypeRemovable      = QStringLiteral("可移动磁盘");
-inline const QString kDriveTypeFixed          = QStringLiteral("本地磁盘");
-inline const QString kDriveTypeRemote         = QStringLiteral("网络驱动器");
-inline const QString kDriveTypeCdrom          = QStringLiteral("光盘驱动器");
-inline const QString kDriveTypeRamdisk        = QStringLiteral("内存盘");
-inline const QString kDriveTypeUnknown        = QStringLiteral("未知设备");
-inline const QString kVolumeRowLine           = QStringLiteral("%1：%2  %3/%4  使用量 %5%");
-inline const QString kDriveTypeVolume         = QStringLiteral("卷");
+// ── 磁盘 / 分区列表 ──
+//
+// 列表是**两层**的：一块物理磁盘一行，它下面的每个文件系统各一行。
+// 选中的永远是"文件系统"那一层，因为本工具只能测文件系统（裸设备一律拒绝）。
+inline const QString kTextUnknownDevice       = QStringLiteral("(未知设备)");
+inline const QString kFsNotMounted            = QStringLiteral("未挂载");
+inline const QString kFsReadOnly              = QStringLiteral("只读挂载");
+inline const QString kFsNoWritableDir         = QStringLiteral("没有可写目录（需要 root）");
+inline const QString kFsNetworkWarning        = QStringLiteral("网络文件系统：测到的是网络，不是盘");
+/// 被排除出列表的卷以及原因。写进自检报告 ——
+/// 否则用户只会看到"我的盘怎么不见了"，无从判断是被规则挡了还是真没认出来。
+inline const QString kIgnoredVolumeFmt        = QStringLiteral("%1（%2）");
+inline const QString kVolumeWhyNetwork        = QStringLiteral("网络驱动器");
+inline const QString kVolumeWhyRamdisk        = QStringLiteral("内存盘");
+inline const QString kVolumeWhyNoPhysicalDisk = QStringLiteral("没有对应的物理磁盘");
+inline const QString kVolumeWhyNoRoot         = QStringLiteral("没有根目录或类型未知");
+inline const QString kDiskSystemTag           = QStringLiteral("[系统盘]");
+inline const QString kDiskVirtualTag          = QStringLiteral("[虚拟设备]");
+/// 文件系统那一行的主文本：设备名、文件系统、挂载点
+inline const QString kFsRowLine               = QStringLiteral("%1  %2  %3");
 inline const QString kGroupTargetDrive        = QStringLiteral("选择磁盘");
-inline const QString kColLetter               = QStringLiteral("盘符");
-inline const QString kColDevice               = QStringLiteral("设备名称");
+inline const QString kColDeviceTree           = QStringLiteral("磁盘 / 分区");
+inline const QString kColTargetDir            = QStringLiteral("可测目录 / 说明");
 inline const QString kColUsage                = QStringLiteral("使用量");
 inline const QString kColUsedTotal            = QStringLiteral("已用 / 总空间");
-inline const QString kDriveHintClick          = QStringLiteral("单击选中目标磁盘");
+inline const QString kDriveHintClick          = QStringLiteral("展开磁盘，选中要测的分区");
 inline const QString kBtnRefresh              = QStringLiteral("刷新");
+inline const QString kBtnBrowseDir            = QStringLiteral("浏览目录…");
 inline const QString kLabelTargetDriveColon   = QStringLiteral("目标磁盘：");
-inline const QString kVolumeSummaryLine       = QStringLiteral("%1  %2  已用 %3%");
+/// 自检报告里"这次枚举到了哪些盘/分区"那几行
+inline const QString kDiskSummaryLine         = QStringLiteral("%1  共 %2");
+inline const QString kFsSummaryLine           = QStringLiteral("    %1  可测目录 %2");
+inline const QString kFsSummaryNoDir          = QStringLiteral("    %1  ✗ %2");
 inline const QString kVolumeLabelFmt          = QStringLiteral("卷标: %1");
 inline const QString kVolumeFsFmt             = QStringLiteral("文件系统: %1");
-inline const QString kVolumeTypeFmt           = QStringLiteral("类型: %1");
-inline const QString kSelfTestTargetMissing   = QStringLiteral("自检指定的目标分区 %1 不存在，已中止");
-inline const QString kTargetRootChanged       = QStringLiteral("原来的目标分区 %1 已不存在，已改为 %2");
+inline const QString kVolumeDeviceFmt         = QStringLiteral("设备: %1");
+inline const QString kVolumeMountFmt          = QStringLiteral("挂载点: %1");
+inline const QString kVolumeSpaceFmt          =
+    QStringLiteral("已用 %1 / 共 %2，可用 %3（%4%）");
+inline const QString kSelfTestTargetMissing   = QStringLiteral("自检指定的目标目录 %1 不在任何可测的文件系统上，已中止");
+inline const QString kTargetGone              = QStringLiteral("原来的目标目录 %1 已不可用，请重新选择");
 inline const QString kTargetNotSelected       = QStringLiteral("还没有选中目标分区。");
 inline const QString kDiskSpaceUnselected     = QStringLiteral("未选择分区");
 inline const QString kTargetFolderFmt         = QStringLiteral("目标：%1");
+/// 目标目录不在文件系统根目录上时必须说清"会写满整个文件系统"，
+/// 否则用户会以为只写自己选的那个目录（比如 /home/moonlight）。
+inline const QString kTargetFilesystemFmt     =
+    QStringLiteral("\n所属文件系统：%1（%2），挂载于 %3");
+inline const QString kTargetFillWholeFmt      =
+    QStringLiteral("\n⚠ 测试会写满整个 %1 文件系统（共 %2），不只是上面这个目录");
+inline const QString kTargetNetworkWarn       = QStringLiteral("\n⚠ 网络文件系统：测到的是网络，不是磁盘");
 inline const QString kTargetPlanFmt           = QStringLiteral("\n将写入：%1 个文件 × %2（合计 %3）");
 inline const QString kTargetNoSpaceForPlan    = QStringLiteral("\n剩余空间不足");
 inline const QString kTargetSelfTestFillLimit = QStringLiteral("\n[自检] 填充上限 %1 MiB");
 inline const QString kDiskSpaceAvailable      = QStringLiteral("可用 %1 / 共 %2");
 inline const QString kDiskBarUsedPercent      = QStringLiteral("已用 %1%");
+/// 「浏览目录…」对话框
+inline const QString kDlgBrowseTargetTitle    = QStringLiteral("选择测试目录");
+inline const QString kDlgBrowseTargetHint     =
+    QStringLiteral("选一个目录，测试文件会建在它下面的 %1 里。\n"
+                   "容量与「写满」针对的是这个目录**所在的文件系统**，不是这个目录本身。");
+inline const QString kErrBrowseDirNotWritable = QStringLiteral("这个目录不可写：%1");
+inline const QString kErrBrowseDirNotMounted  = QStringLiteral("这个目录所在的文件系统读不到容量信息：%1");
 
 // ── 测试参数 ──
 inline const QString kModeSeq            = QStringLiteral("顺序读写");
@@ -93,7 +125,11 @@ inline const QString kConfigDescribeFmt  = QStringLiteral("%1  %2 直接IO  bs=%
 inline const QString kVerifyOn           = QStringLiteral("开");
 inline const QString kVerifyOff          = QStringLiteral("关");
 inline const QString kGroupFioEngine     = QStringLiteral("fio 引擎");
+#ifdef Q_OS_WIN
 inline const QString kFioPathPlaceholder = QStringLiteral("fio.exe 的完整路径");
+#else
+inline const QString kFioPathPlaceholder = QStringLiteral("fio 的完整路径");
+#endif
 inline const QString kBtnBrowse          = QStringLiteral("浏览…");
 inline const QString kFioEngineNotFound  = QStringLiteral("引擎: 未找到");
 inline const QString kFioEngineVersion   = QStringLiteral("引擎: %1（%2）");
@@ -133,8 +169,15 @@ inline const QString kLogRunConclusion   = QStringLiteral("结论：%1");
 inline const QString kLogErrorPrefix     = QStringLiteral("错误：%1");
 inline const QString kLogWarnPrefix      = QStringLiteral("警告：%1");
 inline const QString kIoModeTip          =
+#ifdef Q_OS_WIN
     QStringLiteral("IO 引擎固定为 windowsaio：Windows 上只有它支持 direct=1。\n"
                    "同步引擎（psync / sync）只能用缓冲 I/O，测到的是系统缓存而不是磁盘，故不提供。");
+#else
+    QStringLiteral("Linux 上 direct=1 走的是 O_DIRECT，libaio / io_uring / psync 都支持。\n"
+                   "默认优先用 libaio：只有异步引擎才能让 iodepth 真正生效，\n"
+                   "性能项的 Q8T1 / Q32T1 靠它才测得准。\n"
+                   "如果这份 fio 没有编 libaio，启动时会自动退回可用的那个引擎。");
+#endif
 inline const QString kLabelIoMode        = QStringLiteral("IO 方式");
 inline const QString kParamHint          =
     QStringLiteral("测试会在目标分区的 ml_disktest 目录里生成 testfile_* 文件，"
@@ -193,8 +236,17 @@ inline const QString kAxisSpeed      = QStringLiteral("速度（MiB/s）");
 // ── 状态栏 ──
 inline const QString kModeElevated           = QStringLiteral("提权模式");
 inline const QString kModeNormal             = QStringLiteral("普通模式");
+// "提权"在两个平台上的含义不一样：Windows 是管理员令牌，
+// Linux 上就是 euid == 0。Linux 下普通文件做 O_DIRECT 并不需要 root，
+// 所以这句话只能说"以 root 身份运行"，不能说"必须提权才能测"。
+#ifdef Q_OS_WIN
 inline const QString kModeElevatedTip        = QStringLiteral("当前以管理员身份运行，可以访问需要提权的设备。");
 inline const QString kModeNormalTip          = QStringLiteral("当前是普通权限。\n以管理员身份重新启动本程序即可进入提权模式。");
+#else
+inline const QString kModeElevatedTip        = QStringLiteral("当前以 root 身份运行（euid 0）。");
+inline const QString kModeNormalTip          = QStringLiteral("当前是普通用户。\n"
+                                                              "测试普通文件不需要 root；只有目标目录本身没有写权限时才需要。");
+#endif
 inline const QString kStatusSelectDriveHint  = QStringLiteral("请先在「选择磁盘」列表里选中要测试的分区");
 inline const QString kStatusCleanedFiles     = QStringLiteral("已清理 %1 个测试文件");
 inline const QString kStatusRunDataSaved     = QStringLiteral("已保存 %1 个采样点与本次参数到 %2");
@@ -316,7 +368,11 @@ inline const QString kMsgSelfTestTargetMismatch =
 inline const QString kErrTargetMismatch         = QStringLiteral("目标分区不匹配");
 inline const QString kErrBadParams              = QStringLiteral("参数有误");
 inline const QString kErrFioNotFound            = QStringLiteral("找不到 fio");
+#ifdef Q_OS_WIN
 inline const QString kErrSpecifyFioPath         = QStringLiteral("请先指定 fio.exe 的路径。");
+#else
+inline const QString kErrSpecifyFioPath         = QStringLiteral("请先指定 fio 的路径。");
+#endif
 inline const QString kErrNoTestFilesForRead     =
     QStringLiteral("%1 里没有 testfile_* 文件，无法单独执行读取。\n"
                    "请先勾选「写入」跑一次。");
@@ -398,7 +454,7 @@ inline const QString kReportReadPhaseFiles   = QStringLiteral("读取阶段：%1
 inline const QString kReportReadJobHeader    = QStringLiteral("-------------------- 读取 job --------------------");
 inline const QString kReportWarningLine      = QStringLiteral("*** 警告: %1");
 inline const QString kReportTestEnd          = QStringLiteral("=========== 测试结束 ===========");
-inline const QString kReportTestPartition    = QStringLiteral("测试分区: %1");
+inline const QString kReportTestPartition    = QStringLiteral("测试位置: %1");
 inline const QString kReportRwMode           = QStringLiteral("读写模式: %1");
 inline const QString kReportFioExitCode      = QStringLiteral("  fio 退出码: %1");
 inline const QString kReportSampleWindow     = QStringLiteral("  采样点数: %1  窗口 %2 秒");
@@ -434,14 +490,20 @@ inline const QString kReportTitle            = QStringLiteral("=================
 inline const QString kReportQtVersion        = QStringLiteral("Qt 版本            : ");
 inline const QString kReportQpaPlatform      = QStringLiteral("QPA 平台插件        : ");
 inline const QString kReportFioVersion       = QStringLiteral("fio 版本            : ");
-inline const QString kReportTargetPartition  = QStringLiteral("目标分区            : ");
+inline const QString kReportTargetPartition  = QStringLiteral("目标目录            : ");
 inline const QString kReportTestFolder       = QStringLiteral("测试目录            : ");
 inline const QString kReportTestConfig       = QStringLiteral("测试配置            : ");
 inline const QString kReportRounds           = QStringLiteral("测试圈数            : ");
 inline const QString kReportDataSource       = QStringLiteral("数据来源            : 加载自 ");
 inline const QString kReportNotRealtime      = QStringLiteral("（不是本次实时采集）\n");
 inline const QString kReportStartupError     = QStringLiteral("启动/运行错误       : ");
-inline const QString kReportVolumeList       = QStringLiteral("枚举到的卷          : ");
+inline const QString kReportVolumeList       = QStringLiteral("枚举到的磁盘/分区  :");
+/// 紧接着那一行只是说明"下面缩进的行分别是什么"，不是个数
+inline const QString kReportDiskListNote     = QStringLiteral("（磁盘一行，其下缩进的是它的文件系统）\n");
+/// 被规则排除掉的卷（网络驱动器 / 内存盘 / 没有物理磁盘的映射盘）
+inline const QString kReportIgnoredList      = QStringLiteral("已忽略的驱动器      : ");
+inline const QString kIgnoredListTip          =
+    QStringLiteral("已忽略：%1\n（网络驱动器、内存盘、以及没有对应物理磁盘的映射盘一律不列）");
 inline const QString kReportSuffixCount      = QStringLiteral(" 个\n");
 inline const QString kReportPhaseList        = QStringLiteral("阶段                : ");
 inline const QString kReportFillLimit        = QStringLiteral("填充上限(自检)      : ");
@@ -513,8 +575,13 @@ inline const QString kReportStoppedTag       = QStringLiteral("（含手动停�
 inline const QString kAppDescription = QStringLiteral("基于 fio 的硬盘可靠性测试工具（只做文件模式测试）");
 inline const QString kClSelfTest     = QStringLiteral("无人值守自检：跑一轮完整测试并把报告写到 --outdir。");
 inline const QString kClOutDir       = QStringLiteral("自检输出目录（默认 ./_selftest）");
+#ifdef Q_OS_WIN
 inline const QString kClFioPath      = QStringLiteral("指定 fio.exe 的路径");
 inline const QString kClTarget       = QStringLiteral("自检用的目标分区，例如 G:/");
+#else
+inline const QString kClFioPath      = QStringLiteral("指定 fio 的路径");
+inline const QString kClTarget       = QStringLiteral("自检用的目标挂载点，例如 /（或 /mnt/disk）");
+#endif
 inline const QString kClFillLimit    = QStringLiteral("自检时把“写满分区”的目标压到这么多 MiB（真写满大盘太慢）");
 inline const QString kClMode         = QStringLiteral("自检用的读写模式：seq / rand");
 inline const QString kClStopAfter    = QStringLiteral("自检时在第 N 秒触发一次「停止」，验证停止路径");
@@ -605,9 +672,10 @@ inline const QString kLogPerfPassStart    = QStringLiteral("%1 · %2 开始（%3
 inline const QString kLogDroppedTail      = QStringLiteral("丢弃本阶段最后一拍（必然横跨收尾，速率偏低）：%1");
 inline const QString kMsgFat32TooBigTitle = QStringLiteral("测试数据太大");
 inline const QString kErrFat32TooBig     =
-    QStringLiteral("目标分区 %1 是 FAT32 格式，单个文件最大只能到 4 GiB。\n\n"
+    QStringLiteral("目标分区 %1 是 FAT 文件系统（FAT32 / vfat），单个文件最大只能到 4 GiB。\n\n"
                    "测试数据大小选了 %2，单文件放不下。\n\n"
-                   "请改成 4 GiB 及以下，或者换一个 NTFS / exFAT 分区。");
+                   "请改成 4 GiB 及以下，或者换一个支持大文件的文件系统"
+                   "（NTFS / exFAT / ext4 / xfs 都可以）。");
 inline const QString kLogPreallocating    = QStringLiteral("正在预建测试文件：%1 个 × %2");
 inline const QString kLogPreallocated     = QStringLiteral("测试文件已就绪，合计 %1");
 inline const QString kErrPerfNoItem       = QStringLiteral("请至少勾选一个测试项。");
@@ -622,5 +690,14 @@ inline const QString kTraceBusyTip        = QStringLiteral("测试进行中，�
 inline const QString kTraceClickTip       = QStringLiteral("点击在右边图表里显示这一项的读写曲线");
 inline const QString kErrPerfNoSpace      = QStringLiteral("目标分区剩余 %1，放不下 %2 的测试数据。");
 inline const QString kErrPreallocFailed   = QStringLiteral("预建测试文件失败");
+/// Linux：tmpfs / overlayfs 之类不支持 O_DIRECT 的文件系统上，direct=1 的 job
+/// 会以 "Operation not supported" 失败。这句话要在开测前就说清楚，
+/// 否则用户只会看到一行 fio 报错，很难联想到是文件系统的问题。
+inline const QString kMsgNoDirectIoTitle  = QStringLiteral("文件系统不支持直接 I/O");
+inline const QString kErrNoDirectIo       =
+    QStringLiteral("测试目录 %1 所在的文件系统不支持直接 I/O（O_DIRECT）：%2\n\n"
+                   "本工具固定用 direct=1 绕过系统缓存，测的才是磁盘本身。\n"
+                   "tmpfs、overlayfs 这类文件系统（/dev/shm、/run、容器里的根目录）\n"
+                   "不支持它，请换一个真实磁盘上的目录（ext4 / xfs / btrfs 都支持）。");
 inline const QString kLogPerfAllPlanned   = QStringLiteral("共 %1 项，预计 %2 秒");
 inline const QString kErrCreateJobFailed  = QStringLiteral("无法创建 job 文件");

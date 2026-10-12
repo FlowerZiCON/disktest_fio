@@ -163,14 +163,54 @@ bool FioConfig::engineRequiresBufferedIo(const QString &engine)
     return syncEngines.contains(engine.trimmed().toLower());
 }
 
+namespace {
+/// 运行时探测到的 IO 引擎。空串 = 还没探测过，用平台默认值。
+QString g_ioEngineOverride;
+} // namespace
+
+QString FioConfig::defaultIoEngine()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("windowsaio");
+#else
+    // Linux 上 direct=1 走的是 O_DIRECT，libaio / io_uring / psync 都支持。
+    // 默认 libaio：只有它这个异步引擎能让 iodepth 真正生效。
+    return QStringLiteral("libaio");
+#endif
+}
+
+QStringList FioConfig::candidateIoEngines()
+{
+#ifdef Q_OS_WIN
+    return {QStringLiteral("windowsaio"), QStringLiteral("psync")};
+#else
+    // posixaio 排在 psync 前面：它同样是同步接口，但至少走的是 aio 那套
+    // 语义，在少数没有 libaio/io_uring 的 fio 构建里比 psync 更接近原意。
+    return {QStringLiteral("libaio"), QStringLiteral("io_uring"),
+            QStringLiteral("posixaio"), QStringLiteral("psync")};
+#endif
+}
+
+QString FioConfig::ioEngine()
+{
+    return g_ioEngineOverride.isEmpty() ? defaultIoEngine() : g_ioEngineOverride;
+}
+
+void FioConfig::setIoEngine(const QString &engine)
+{
+    g_ioEngineOverride = engine.trimmed().toLower();
+}
+
 QString FioConfig::testFolder() const
 {
-    QString root = targetRoot.trimmed();
-    if (root.isEmpty())
+    // 目标是一个**目录**，测试文件建在它下面的 ml_disktest 里。
+    // 传挂载点（"/"、"C:/"）也照样成立 —— 挂载点本身也是目录。
+    QString dir = targetDir.trimmed();
+    if (dir.isEmpty())
         return QString();
-    if (!root.endsWith(QLatin1Char('/')) && !root.endsWith(QLatin1Char('\\')))
-        root += QLatin1Char('/');
-    return QDir::cleanPath(root + folderName());
+    if (!dir.endsWith(QLatin1Char('/')) && !dir.endsWith(QLatin1Char('\\')))
+        dir += QLatin1Char('/');
+    return QDir::cleanPath(dir + folderName());
 }
 
 QString FioConfig::testFilePattern() const
@@ -358,7 +398,7 @@ bool FioConfig::validate(QString *error) const
         return false;
     };
 
-    if (targetRoot.trimmed().isEmpty())
+    if (targetDir.trimmed().isEmpty())
         return fail(kErrNeedDrive);
 
     const QString folder = testFolder();
@@ -382,9 +422,9 @@ bool FioConfig::validate(QString *error) const
     if (rounds < 1)
         return fail(kErrRoundsTooSmall);
 
-    const QFileInfo rootInfo(targetRoot);
-    if (!rootInfo.exists() || !rootInfo.isDir())
-        return fail(kErrTargetUnavailable.arg(targetRoot));
+    const QFileInfo targetInfo(targetDir);
+    if (!targetInfo.exists() || !targetInfo.isDir())
+        return fail(kErrTargetUnavailable.arg(targetDir));
 
     return true;
 }

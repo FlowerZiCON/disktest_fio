@@ -14,13 +14,54 @@
 
 ## 1. 测试流程
 
-1. 在「目标分区」列表里**单击选中**一块盘。
+1. 在「选择磁盘」列表里展开一块盘，**单击选中它下面的某个文件系统**。
 2. 点「开始测试」。程序会：
    1. 算出文件计划：`testfile_0 … testfile_N-1`，每个不超过 **2 GiB**
       （FAT32 单文件上限是 4 GiB，留一半余量最稳）；
    2. **写入阶段**：fio 用 `create_on_open` **边写边建**这些文件，一遍把分区写满；
    3. **读取阶段**：fio 把同样多的字节读一遍，并逐块做 **crc32c 校验**。
 3. 结果直接看状态栏和界面上的卡片；「文件 → 清理测试文件」可以删掉这些文件。
+
+### 目标为什么是一个目录，而不是一个分区 / 盘符
+
+**容量和"写满"针对的从来不是"某个挂载点"，而是"某个文件系统"。**
+所以同一个文件系统里的**任意一个可写目录**都是等价的：写进去的字节落在同一块设备上，
+容量、剩余空间、写满的对象全都一样。程序就是按这个来的 ——
+目标是一个**目录**，测试文件建在 `<目标目录>/ml_disktest` 里。
+
+这样做解决的是 Linux 上一个很实际的麻烦：
+
+| | 按挂载点选 | 按目录选 |
+| --- | --- | --- |
+| 想测系统盘 | 只能选 `/`，而 `/` 通常**只有 root 能写** → 必须 `sudo` 跑整个 GUI | 选 `/home/<你>` 就行，它在同一个文件系统上，**不需要 root** |
+| 一个分区挂多处（bind mount / btrfs 子卷） | 会出现好几行，不知道选哪个 | 都一样，随便哪个都行 |
+| 挂载点根只读、但下面某个目录可写 | 选不了 | 直接指定那个目录 |
+
+实测（Ubuntu 22.04，普通用户）：
+
+```
+/                → /dev/sda1  ext4  233.2 GiB  可写=否
+/home/moonlight  → /dev/sda1  ext4  233.2 GiB  可写=是   ← 同一个文件系统
+```
+
+所以界面上会这么写，避免"我以为只写自己那个目录"的误会：
+
+```
+目标: /home/moonlight/ml_disktest
+所属文件系统: /dev/sda1 (ext4), 挂载于 /
+⚠ 测试会写满整个 / 文件系统（共 233.2 GiB），不只是上面这个目录
+```
+
+- 列表里**只有文件系统那一层可选**：上面那层是物理磁盘（只当分组标题，点了没用），
+  测不了的分区（只读、未挂载、没有可写目录）灰掉且不可选。
+- 「可测目录」那一列就是程序替你挑好的目录。挑的顺序是
+  **挂载点本身 → 用户主目录 → `/var/tmp` → `/tmp`**，每个候选都要
+  **真的能建出目录**、而且必须和目标**同属一个文件系统**才算数。
+  注意不能用 `QFileInfo::isWritable()` 判断：Windows 上它只看只读属性，
+  `C:\` 会被误判成可写，实际 `mkdir` 是 Access denied。
+- 都不行就显示「没有可写目录（需要 root）」，你也可以用「浏览目录…」自己指定一个。
+- Windows 上是同一套模型：列表按物理磁盘分组、盘符就是它的文件系统，
+  自动挑出来的可写目录通常是盘符根目录（系统盘上则是你的用户目录）。
 
 ### 横轴是可用空间，不是时间
 
@@ -664,6 +705,48 @@ build.bat help                               全部用法
 > 出现过"源码明明改了、编出来的 exe 行为却不对"，clean 一次就正常
 > （怀疑是生成器/中间产物混用，但没定位到单一原因）。
 > 全量重建多花几十秒，换来"编出来的就是源码现在的样子"。
+
+#### 2026-10 查到了增量构建为什么会坏（而且比"行为不对"更糟：会直接崩）
+
+**现象**：改一个被广泛 include 的头文件（比如 `uitext.h`）之后只做增量构建，
+编出来的 exe 跑自检会以 `0xC0000409`（`FAST_FAIL_STACK_COOKIE_CHECK_FAILURE`）退出。
+`--clean-first` 之后稳定正常。
+
+**机制**：这台机器上的 `build.ninja` 里，编译规则是
+
+```
+build CMakeFiles\qtfiogui.dir\src\mainwindow.cpp.obj: CXX_COMPILER__qtfiogui_unscanned_Release ...
+  deps = gcc
+```
+
+`unscanned` + `deps = gcc` 的意思是：**CMake 关掉了依赖扫描，并让 Ninja 去读
+GCC 风格的 `.d` 文件** —— 而 cl.exe 根本不产生 `.d`（构建目录里 `.d` 文件数为 **0**）。
+于是 Ninja 完全不知道任何源文件依赖哪些头文件。实测：
+
+```
+touch src/uitext.h && cmake --build build
+→ 被重编的 .cpp 数量 = 0   （正确的话应该是全部 13 个左右）
+```
+
+改了 `driveinfo.h` 里的结构体布局却不重编用到它的 `.cpp`，
+两个编译单元对同一个结构体的认识就不一致了 —— 这就是栈 cookie 检查失败、
+进程直接崩掉的原因。
+
+**能确认的**：
+- 同一台机器、全新目录、CMake 4.3.0-rc2 和 Qt 自带的 3.30.5（全新目录）
+  都一样是 `deps = gcc` + `unscanned`；显式传 `-DCMAKE_DEPENDS_USE_COMPILER=ON` 也没变。
+- 这台机器的 cl.exe 是中文的，`/showIncludes` 输出的是
+  `注意: 包含文件:  ...`，不是英文的 `Note: including file:`；
+  而 CMake 里找不到任何记录下来的前缀（配置缓存里没有 `*INCLUDE_PREFIX`）。
+- 试过 `set VSLANG=1033`，cl.exe 的输出**没有变化**（仍然是中文）。
+
+**没定位到的**：CMake 到底是在哪一步放弃扫描的。CMake 自己的 `Modules\*.cmake`
+里没有硬编码的前缀，所以这段逻辑在二进制里，暂时没法确定是"探测失败后放弃"
+还是别的原因。
+
+**所以现在的做法**：改头文件之后**必须全量重建**。`build.bat` 默认就是全量，
+手动构建时用 `cmake --build build --clean-first`。这条不是"多花几十秒保险"，
+而是"不全量就会得到一个会崩的二进制"。
 > 只想删目录不编译时用 `build.bat clean`。
 
 脚本会自己找工具链，找得到就用、找不到才报错：
@@ -685,7 +768,7 @@ build.bat help                               全部用法
   代码页解码，重定向到文件或管道时就变成 `?????`；改成 GBK 或 UTF-8 都只是把问题
   换个方向。中文说明放在这份文档里。
 
-### 手动 CMake
+### 手动 CMake（Windows）
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
@@ -714,6 +797,77 @@ Qt 是 `/MD` 构建的，所以本程序必须跟着动态链接 CRT（不能静
 自足性验证：把 `dist` 拷到工作区外的临时目录，用
 `PATH=C:\WINDOWS\system32;C:\WINDOWS`（完全不含 Qt）启动，跑完整测试 PASS；
 并用 `dumpbin /dependents` 扫过包里全部二进制，被引用的 MSVC 运行库**缺失 0 个**。
+
+### Linux 上构建（Ubuntu 22.04 Server 实测）
+
+`build.bat` 是 Windows 专用的，Linux 上直接走 CMake：
+
+```bash
+sudo apt install build-essential cmake ninja-build qt6-base-dev libqt6charts6-dev fio
+cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-linux -j
+./build-linux/qtfiogui
+```
+
+| 依赖 | 要求 | Ubuntu 22.04 (jammy) 里的包 |
+| --- | --- | --- |
+| 编译器 | 支持 C++17 | `build-essential`（实测 g++ 11.4） |
+| CMake | ≥ 3.21 | `cmake`（3.22.1） |
+| Qt | **≥ 6.2** | `qt6-base-dev`（6.2.4，universe） |
+| Qt Charts | 同 Qt | `libqt6charts6-dev`（6.2.4） |
+| fio | 3.x，且编了 `libaio` | `fio`（3.28，含 libaio / io_uring） |
+
+几件 Linux 上特有的：
+
+- **Qt 的下限是 6.2，不是 6.5**。jammy 的 universe 里就是 6.2.4；
+  把下限写成 6.5 会在这类发行版上直接 `find_package` 失败。
+  代码没有用到 6.2 之后才有的 API，Windows 上的 6.8 照样满足这个下限。
+- **不需要自备 fio**。程序按 `<程序目录>/fio/fio` → 系统 PATH 的顺序找，
+  发行版装的 `/usr/bin/fio` 正好走第二条。本仓库 `third_party/fio/` 里那份是
+  Windows 构建（PE 文件），在 Linux 上跑不了，`package` 也不会带上它。
+- **`package` 在 Linux 上只收集 exe + 许可证 + README**，不拷 Qt 运行时
+  （`windeployqt` 是 Windows 工具，发行版的 Qt6 本来就在系统里）。
+  想连 fio 一起发，就把一份 Linux 版 fio 放进 `third_party/fio/`，
+  打包命令会自动带上它。真要发便携包还得另配 AppImage 之类。
+- **`resources/app.rc` 只在 Windows 下参与编译**。CMake 只在 Windows 上启用 RC 语言，
+  在 Linux 上把 `.rc` 塞进 target 会让 g++ 去编它、直接报错。
+
+没有图形界面的机器（服务器 / CI）上跑自检：
+
+```bash
+QT_QPA_PLATFORM=offscreen ./build-linux/qtfiogui --selftest \
+    --outdir /tmp/st --selftest-target /mnt/testdisk --selftest-fill-limit 200
+```
+
+`grab()` 在 offscreen 插件下可用，报告里的 `chart.png` / `window.png` 照样出得来；
+有 X（或 X11 转发）时不需要这个变量。
+
+`--selftest-target` 收的是**目录**（任何一个该文件系统上可写的目录都行）：
+
+```bash
+# 测一块单独的分区 / U 盘
+--selftest-target /mnt/testdisk
+# 测系统盘 —— 传 $HOME 就行，它在同一个文件系统上，**不需要 root**
+--selftest-target "$HOME"
+```
+
+![Linux 上跑性能测试](images/linux-window.png)
+
+（上面这张就是 Ubuntu 22.04 上的实际截图：`挂载点` 那一列、`IO 方式: libaio + 直接 I/O`
+都是 Linux 分支的产物。）
+
+手边没有多余的盘时，用一块**回环文件**造一个安全的测试目标最省事
+（不要拿 `/` 试；这条也是本机验证时用的办法）：
+
+```bash
+dd if=/dev/zero of=/tmp/disk.img bs=1M count=1500
+sudo losetup -f --show /tmp/disk.img        # 记下输出，例如 /dev/loop6
+sudo mkfs.ext4 /dev/loop6
+sudo mkdir -p /mnt/testdisk && sudo mount /dev/loop6 /mnt/testdisk
+sudo chown "$USER" /mnt/testdisk            # 让普通用户能写，程序不需要 root
+# 用完清理：
+sudo umount /mnt/testdisk && sudo losetup -d /dev/loop6 && rm /tmp/disk.img
+```
 
 ---
 
@@ -790,9 +944,9 @@ value exceeds max length of 260 | fio: failed parsing filename=... | fio: job gl
 而是走 `FioRunner::verifyFailureRaised` 实时送到界面上的大字告警条，
 阶段结束时也写进 `selftest.log` 的「校验失败块数 / 首处失败原话」两行。
 
-### 5.8 Windows 上只有 windowsaio 能干正事
+### 5.8 Windows 上只有 windowsaio 能干正事（Linux 上不是）
 
-所以引擎和 `direct` 都**固定下来、不提供选择**（`windowsaio` + `direct=1`）：
+Windows 上引擎和 `direct` 都**固定下来、不提供选择**（`windowsaio` + `direct=1`）：
 
 | 引擎 | `direct=1` | `direct=0` | 结论 |
 | --- | --- | --- | --- |
@@ -801,8 +955,22 @@ value exceeds max length of 260 | fio: failed parsing filename=... | fio: job gl
 | `vsync` | ❌ | ❌ `readv is not implemented` | 不可用 |
 | `mmap` | ❌ | ⚠️ 实时曲线恒为 0 | 不可用 |
 
-缓冲 I/O 测的是系统缓存，对这个工具没有意义，所以界面上只留一行静态说明
-（`IO 方式: windowsaio + 直接 I/O（绕过系统缓存）`），不再给用户选错的机会。
+**但这张表是 Windows 的事实，不是 fio 的事实。** Linux 上 `direct=1` 就是 `O_DIRECT`，
+`libaio` / `io_uring` / `posixaio` / `psync` 都支持它（`psync` 在 Linux 上也能带 `O_DIRECT`
+打开文件，只是同步接口，`iodepth` 形同虚设）。所以引擎改成按平台给默认值：
+
+| 平台 | 默认 | 候选（探测顺序） |
+| --- | --- | --- |
+| Windows | `windowsaio` | windowsaio → psync |
+| Linux | `libaio` | libaio → io_uring → posixaio → psync |
+
+选 `libaio` 是为了让 `iodepth` 真正生效 —— 性能项的 Q8T1 / Q32T1 靠它才测得准。
+发行版的 fio 未必编了 libaio，所以程序在解析出 fio 路径之后会跑一次
+`fio --enghelp`（`FioRunner::queryEngines()`），按上表的顺序挑第一个真正存在的；
+探不出来就退回平台默认值，**不会**因为探测失败把界面搞成"没有引擎可用"。
+界面上那行静态说明（`IO 方式: … + 直接 I/O（绕过系统缓存）`）在探测完成后刷新。
+
+不管哪个平台，`direct` 都是固定的：缓冲 I/O 测的是系统缓存，对这个工具没有意义。
 `FioConfig::engineRequiresBufferedIo()` 的判断逻辑保留着，自检里仍有断言覆盖。
 
 ### 5.9 NTFS 上"有长度但从没写过"的文件读起来是假的
@@ -815,18 +983,60 @@ vs 真实写满 642 MiB/s）。本工具靠"写入阶段写满每一个块"来�
 副作用是：**如果写入阶段被中断**，盘上会留下已分配但没写全的文件，
 此时单独跑只读校验会偏快。重新完整跑一遍写入即可。
 
-### 5.10 卷标基本是空的，得去问物理设备
+### 5.10 卷标基本是空的；列表要按"物理磁盘"组织
 
 `QStorageInfo::displayName()` 在很多盘上返回的是盘符本身，因为这些卷压根没有卷标。
-所以「设备名称」用两个**只读** IOCTL 去问物理设备
-（`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` + `IOCTL_STORAGE_QUERY_PROPERTY`），
-两个句柄都是 `dwDesiredAccess = 0`，只取属性字符串，不读也不写任何扇区。
-拿不到时依次回落到卷标、类型描述：
+而且**挂载点不是区分磁盘的好办法**：Linux 上一个分区可能挂在好几处（bind mount、
+btrfs 子卷），而"我想测这块盘"跟它挂在哪儿没有关系。所以列表改成**两层**：
 
 ```
-C:：UMIS RPJYJ1T24MLR1HWY     831.3 GB/952.7 GB  使用量 87.3%
-D:：Predator SSD GM7000 1TB   914.0 GB/953.9 GB  使用量 95.8%
-Z:：RainTek MONSOON Ultra       1.4 TB/1.9 TB    使用量 77.8%
+磁盘 / 分区              可测目录 / 说明    已用 / 总空间   使用量
+▼ sda  VMware, V...     [系统盘]          238.0 GiB
+    sda1  ext4  /        /home/moonli...   198/233 GiB    84.8%
+▼ nvme0n1  Samsung...                     931 GiB
+    nvme0n1p2  ext4  /   /var/tmp          560/931 GiB    60.2%
+  loop12                 [虚拟设备]         1.5 GiB
+    loop12  ext4  /mnt/testdisk  /mnt/testdisk  0.1/1.4 GiB  6.3%
+```
+
+选中的永远是**文件系统**那一层 —— 本工具只能测文件系统（裸设备一律拒绝）。
+上面那层只是分组标题（不可选），测不了的分区（只读 / 未挂载 / 没有可写目录）
+灰掉且不可选，但仍然列出来，好让你知道"它存在、为什么测不了"。
+
+两边的数据来源：
+
+| | Windows | Linux |
+| --- | --- | --- |
+| 磁盘型号 | 两个**只读** IOCTL：`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` + `IOCTL_STORAGE_QUERY_PROPERTY`，句柄都是 `dwDesiredAccess = 0` | `lsblk -J`（未编 util-linux 时退回 `/sys/block/<盘>/device/{vendor,model}`） |
+| 分组依据 | 卷 → `PhysicalDriveN`（同一个盘号归一组） | lsblk 给的 `disk → part → lvm/crypt` 层次（**递归**，LVM 套在分区里也认） |
+| 噪音过滤 | — | 丢掉 `rom`，以及**只读的 squashfs 回环**（snap 快照一台机器上能有十几个）；用户自己 `losetup` 挂的 ext4 回环仍然保留 |
+
+拿不到型号时就只显示内核名（`sda` / `loop12`），不会瞎猜。
+
+**网络驱动器和虚拟磁盘一律不列**，而且**任何权限下都不列** —— 这是刻意的：
+
+| 平台 | 不列的东西 | 判据 |
+| --- | --- | --- |
+| Windows | 映射的网络驱动器 | `GetDriveTypeW` 返回 `DRIVE_REMOTE`（`X:` 这种 `\\server\share`） |
+| Windows | 内存盘 | `DRIVE_RAMDISK` |
+| Windows | 没有对应物理磁盘的卷 | `\\.\X:` 不响应 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（subst、各种重定向器） |
+| Linux | 网络文件系统 | `nfs` / `cifs` / `sshfs` / `9p` / `ceph` … |
+| Linux | 只读的 squashfs 回环 | snap 快照，一台机器上十几个 |
+| Linux | tmpfs / proc / sysfs 之类 | 本来就没有块设备 |
+
+为什么 Windows 上这条必须"非黑即白"：这类卷**在普通权限下会出现在列表里却完全不可用**
+（建目录直接报 `ERROR_INVALID_OWNER` / 拒绝访问），**提权之后又会消失** ——
+同一个东西在两种权限下表现不一致，怎么解释都是 bug，所以干脆两边都不列。
+
+反过来，**Linux 上的回环 / LVM / RAID 是要保留的**：LVM 常常就是系统盘本身，
+回环设备也是"拿镜像当盘测"的正常用法，它们都真的能测。所以它们带一个
+`[虚拟设备]` 标记留在列表里，而不是被过滤掉。
+
+被过滤掉的盘不会悄悄消失 —— 报告里「枚举到的磁盘/分区」下面会多一行，
+鼠标放到列表上也有 tooltip：
+
+```
+已忽略的驱动器      : X:（网络驱动器）  Y:（网络驱动器）
 ```
 
 ### 5.11 fio 找不到时不要指望它自己乱找
@@ -837,6 +1047,87 @@ Z:：RainTek MONSOON Ultra       1.4 TB/1.9 TB    使用量 77.8%
 以前这里还会逐级向上翻目录、再去猜 `C:\Program Files\fio`。
 换台电脑之后那些路径本来就会失效，猜对了也只是碰运气，
 猜错了反而让人以为"程序能找到"——现在改成找不到就明说。
+
+### 5.12 Linux 上采样 fio 的 I/O：`/proc/<pid>/io` 的 `st_size` 是 0
+
+实时曲线在 Windows 上靠 `GetProcessIoCounters()`，Linux 上的等价物是
+`/proc/<pid>/io` 的 `read_bytes` / `write_bytes`。这两个数字**是整个线程组**的合计
+（内核在 tgid 视角会把每个线程的 `ioac` 加起来），而 job 命令行固定带 `--thread`，
+所有 I/O 都在 fio 进程里，所以正好对上。
+
+**坑在这里**：`/proc/<pid>/io` 的 `st_size` **恒为 0**（procfs 不报大小），
+而 `QFile::atEnd()` 对普通文件是按 `pos() >= size()` 判的 —— 于是
+
+```cpp
+while (!file.atEnd()) { ... }   // 一次都不进，直接当成"读不到计数"
+```
+
+`attach()` 永远返回 false，日志里刷满「无法读取 fio 进程 I/O 计数」，
+整条实时曲线/平均值/已用时的链路全废。实测确认：
+
+```
+$ stat -c "size=%s" /proc/9696/io
+size=0
+$ cat /proc/9696/io
+rchar: 52218
+read_bytes: 8044675072     ← 数据明明在
+```
+
+修法是这段**不用 QFile，直接用 POSIX 的 `open`/`read`**（见 `ProcessIoCounter::read`）。
+顺带两条：
+
+- 用 `read_bytes`/`write_bytes`（块层实际传输量），**不要**用 `rchar`/`wchar`
+  （会把命中页缓存的读写也算进去）。只有在没有 `*_bytes` 字段（内核没开
+  `CONFIG_TASK_IO_ACCOUNTING`）时才回退到 `rchar`/`wchar`。
+- 别去掉 `--thread`。Windows 上它是为了消掉 process-shared-mutex 警告，
+  在 Linux 上它还决定了这个计数器能不能看到 I/O：fork 模式下 I/O 在子进程里，
+  父进程的计数恒为 0。
+
+实测对得上（Ubuntu 22.04 / fio 3.28 / ext4 loop 设备，随机 4K 写 965 MiB）：
+
+| | 采样得到的平均 | fio 自己报的汇总 |
+| --- | --- | --- |
+| 写入 | 220.7 MiB/s | 233.0 MiB/s |
+| 读取 | 591.4 MiB/s | 603.0 MiB/s |
+
+差的那点正是被丢掉的第 1 拍（见 §1「每个阶段的第 1 个采样点会被丢掉」）。
+
+### 5.13 Linux 与 Windows 的几处平台差异
+
+一次适配里改的都是这类"同一件事两个平台叫法不同"的地方：
+
+| 事情 | Windows | Linux | 处理 |
+| --- | --- | --- | --- |
+| 选什么当目标 | 盘符（= 一个文件系统） | 挂载点只是文件系统的一个"落点" | **统一改成"一个可写目录"**，见 §1「目标为什么是一个目录」 |
+| 卷的标识 | 盘符 `C:` | 挂载点 `/home` | 列表第一列在 Linux 上是设备名 + 挂载点；Windows 上是盘符 |
+| 路径归一化 | `G:` / `G:\` / `G:/` 都要认 | `/mnt/disk` vs `/mnt/disk/` | `normalizedRoot()` 统一走 `QDir::cleanPath`，Windows 再额外把盘符大写 |
+| "是不是同一块盘" | 比卷根 | 比 `st_dev` | `sameFileSystem()`；bind mount / LVM / btrfs 子卷都判得准 |
+| 物理磁盘型号 | 两个只读 IOCTL | `lsblk -J` 的 MODEL/VENDOR | 见 §5.10 |
+| 文件系统名 | `GetVolumeInformationW` → `FAT32` / `exFAT` | `QStorageInfo::fileSystemType()` → `vfat` / `exfat` | `isFatFileSystem()` 同时认 `fat*` 和 `vfat`/`msdos`；**故意不用 `contains("fat")`**，否则 exFAT 会被误拦（它没有 4 GiB 单文件上限） |
+| "能不能写" | — | — | `canUseAsTestDir()` **真去建一个临时目录再删掉**；Windows 上 `QFileInfo::isWritable()` **不能用** —— 它只看只读属性，`C:\` 会被误判成可写，实际 `mkdir` 是 Access denied |
+| fio 可执行文件名 | `fio.exe` | `fio` | `fioExecutableName()`（CMake 那边是 `FIO_EXE_NAME`），找自带的那份和打包都用它 |
+| 直接 I/O 预检 | 不需要 | tmpfs/ramfs/overlayfs 可能不支持 `O_DIRECT` | `supportsDirectIo()` 在目标目录里用 4 KiB 对齐缓冲区试写一次再删掉 |
+
+关于最后一条，实测（内核 6.8）：
+
+```
+/mnt/testdisk  (ext4)   -> SUPPORTED
+/mnt/tmpfstest (tmpfs)  -> SUPPORTED      ← 6.8 的 tmpfs 已经支持 O_DIRECT 了
+/mnt/ramfstest (ramfs)  -> NOT SUPPORTED  err=无效的参数
+```
+
+也就是说 tmpfs 在新内核上其实能用；这个预检挡的是 ramfs 这类真正不支持的，
+以及**老内核上的 tmpfs / 容器里的 overlayfs**。挡下来时报的是
+「测试目录 X 所在的文件系统不支持直接 I/O」并给出 errno，
+比让 fio 抛一句 `Operation not supported` 好排查得多。
+
+另外两点：
+
+- **`--selftest-target` 收的是目录**（挂载点本身也是目录，所以老写法照样能用）。
+  自检里"目标盘对不对"这一条比的是 `sameFileSystem()` 而不是路径相等 ——
+  同一个文件系统里的另一个目录本来就等价，但换到另一个文件系统就一定是写错盘了。
+- 列表里出现 X:/ Y:/ 这种"没有可写目录"的行是正常的：网络盘 / subst 盘
+  在受限令牌下建目录会报 `ERROR_INVALID_OWNER`，程序就把它标成不可测。
 
 ---
 

@@ -8,14 +8,25 @@ project(qtfiogui
 # 官方 fio 放在 third_party 下。打包时只带上运行需要的文件，
 # examples/ 是给人看的样例、不随包发布。
 set(FIO_DIR "${CMAKE_SOURCE_DIR}/third_party/fio"
-    CACHE PATH "官方 fio 所在目录（内含 fio.exe）")
+    CACHE PATH "官方 fio 所在目录（内含 fio.exe / fio）")
+
+# fio 在 Windows 上叫 fio.exe，在 Linux 上就叫 fio。程序里找"自带的那份"
+# 用的是同一个名字，两边必须一致，所以只在这里定义一次。
+if(WIN32)
+    set(FIO_EXE_NAME "fio.exe")
+else()
+    set(FIO_EXE_NAME "fio")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Charts)
+# 6.2 是下限而不是首选：Ubuntu 22.04 (jammy) 的 universe 里就是 Qt 6.2.4
+# （qt6-base-dev + libqt6charts6-dev），把下限写成 6.5 会让 Linux 上直接
+# 找不到 Qt。代码没有用到 6.2 之后才有的 API，Windows 上的 6.8 照样满足。
+find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Charts)
 
 add_executable(qtfiogui WIN32
     src/main.cpp
@@ -39,11 +50,16 @@ add_executable(qtfiogui WIN32
     src/resultwindow.cpp
     src/mainwindow.h
     src/mainwindow.cpp
-    # exe 文件图标（资源管理器 / 任务栏 / Alt+Tab）
-    resources/app.rc
     # 窗口图标用的 PNG，编进 qrc 随程序走
     resources/resources.qrc
 )
+
+# exe 文件图标（资源管理器 / 任务栏 / Alt+Tab）。
+# .rc 只有 Windows 工具链认识，CMake 也只在 Windows 上启用 RC 语言；
+# 在 Linux 上把它塞进 add_executable 会让 g++ 去编这个文件，直接报错。
+if(WIN32)
+    target_sources(qtfiogui PRIVATE resources/app.rc)
+endif()
 
 target_link_libraries(qtfiogui PRIVATE Qt6::Widgets Qt6::Charts)
 
@@ -62,14 +78,19 @@ endif()
 # resources/logo.ico 是给 Windows 用的多尺寸版本（母版只有 128 一帧，缩到 16px 会糊）。
 #   python tools/make_icon.py resources/logo.ico resources/logo-window.png \
 #          --from resources/logo-source.ico
-find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_Interpreter_FOUND)
-    add_custom_target(icon
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/make_icon.py"
-                "${CMAKE_SOURCE_DIR}/resources/logo.ico"
-                "${CMAKE_SOURCE_DIR}/resources/logo-window.png"
-                --from "${CMAKE_SOURCE_DIR}/resources/logo-source.ico"
-        COMMENT "重新生成 resources/logo.ico 与 logo-window.png")
+#
+# 只在 Windows 上有意义：logo.ico 的唯一用途是被 app.rc 编进 pe 文件，
+# Linux 用的窗口图标是 qrc 里那张 logo-window.png（两边共用，已经生成好了）。
+if(WIN32)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_custom_target(icon
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/make_icon.py"
+                    "${CMAKE_SOURCE_DIR}/resources/logo.ico"
+                    "${CMAKE_SOURCE_DIR}/resources/logo-window.png"
+                    --from "${CMAKE_SOURCE_DIR}/resources/logo-source.ico"
+            COMMENT "重新生成 resources/logo.ico 与 logo-window.png")
+    endif()
 endif()
 
 # ---------------------------------------------------------------- 打包
@@ -111,6 +132,26 @@ if(MSVC)
     endif()
 endif()
 
+# 随包发布的那份 fio。Windows 上是仓库里带的 fio.exe，Linux 上一般直接用
+# 发行版的 fio（本仓库 third_party/fio 里放的是 Windows 构建，Linux 上跑不了），
+# 找不到就不附 —— 程序会自己去 PATH 上找。
+set(_fio_binary "${FIO_DIR}/${FIO_EXE_NAME}")
+set(PACKAGE_FIO_COMMANDS "")
+if(EXISTS "${_fio_binary}")
+    # 只带 fio 可执行文件 + 许可证/说明；上游的 examples/ 不随包发布
+    # （55 个样例 .fio 文件，程序一个都不读）
+    set(PACKAGE_FIO_COMMANDS
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}/fio"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "${_fio_binary}" "${DIST_DIR}/fio/${FIO_EXE_NAME}"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "${FIO_DIR}/COPYING.txt" "${FIO_DIR}/MORAL-LICENSE.txt"
+                "${FIO_DIR}/README.txt" "${FIO_DIR}/HOWTO.txt"
+                "${FIO_DIR}/REPORTING-BUGS.txt" "${DIST_DIR}/fio/")
+else()
+    message(STATUS "没找到 ${_fio_binary}：打包时不附 fio，程序会去 PATH 上找")
+endif()
+
 if(TARGET Qt6::windeployqt)
     add_custom_target(package
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DIST_DIR}"
@@ -119,15 +160,7 @@ if(TARGET Qt6::windeployqt)
         COMMAND Qt6::windeployqt --release --no-translations --no-opengl-sw
                 --no-system-d3d-compiler "${DIST_DIR}/qtfiogui.exe"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${MSVC_CRT_DLLS} "${DIST_DIR}/"
-    # 只带 fio.exe + 许可证/说明；上游的 examples/ 不随包发布
-    # （55 个样例 .fio 文件，程序一个都不读）
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}/fio"
-    COMMAND "${CMAKE_COMMAND}" -E copy
-            "${FIO_DIR}/fio.exe" "${DIST_DIR}/fio/fio.exe"
-    COMMAND "${CMAKE_COMMAND}" -E copy
-            "${FIO_DIR}/COPYING.txt" "${FIO_DIR}/MORAL-LICENSE.txt"
-            "${FIO_DIR}/README.txt" "${FIO_DIR}/HOWTO.txt"
-            "${FIO_DIR}/REPORTING-BUGS.txt" "${DIST_DIR}/fio/"
+        ${PACKAGE_FIO_COMMANDS}
     # 许可证文本集中放在 dist/licenses/：
     #   LICENSE                 程序自身（GPL-3.0）
     #   THIRD-PARTY-NOTICES.md  第三方组件汇总说明
@@ -157,6 +190,35 @@ if(TARGET Qt6::windeployqt)
                 --no-system-d3d-compiler "$<TARGET_FILE:qtfiogui>"
         DEPENDS qtfiogui
         COMMENT "windeployqt: 把 Qt 运行时拷到 exe 旁边")
+else()
+    # Linux（没有 windeployqt）：Qt 运行时是发行版提供的，不入包。
+    # 这里只把 exe + 许可证 + README 收进 dist，方便直接 tar 走。
+    # 想连 fio 一起发，就把一份 Linux 版 fio 放进 third_party/fio/，
+    # 上面那段 PACKAGE_FIO_COMMANDS 会自动把它带上。
+    add_custom_target(package
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DIST_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:qtfiogui>" "${DIST_DIR}/"
+        ${PACKAGE_FIO_COMMANDS}
+    # 许可证文本集中放在 dist/licenses/：
+    #   LICENSE                 程序自身（GPL-3.0）
+    #   THIRD-PARTY-NOTICES.md  第三方组件汇总说明
+    #   Qt-LGPLv3.txt           Qt（LGPL-3.0）
+    #   fio-GPLv2.txt           fio（GPL-2.0）
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}/licenses"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${CMAKE_SOURCE_DIR}/LICENSE"
+            "${CMAKE_SOURCE_DIR}/THIRD-PARTY-NOTICES.md"
+            "${CMAKE_SOURCE_DIR}/licenses/Qt-LGPLv3.txt"
+            "${CMAKE_SOURCE_DIR}/licenses/fio-GPLv2.txt"
+            "${DIST_DIR}/licenses/"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+            "${CMAKE_SOURCE_DIR}/README.md" "${DIST_DIR}/README.md"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/docs/images" "${DIST_DIR}/docs/images"
+        DEPENDS qtfiogui
+        COMMENT "打包到 ${DIST_DIR}（exe + 许可证 + README；Qt 运行时由发行版提供）"
+        VERBATIM)
 endif()
 
 # 用 cmake --install 分发时许可证也必须跟着走：GPL 第 4/6 条要求随二进制

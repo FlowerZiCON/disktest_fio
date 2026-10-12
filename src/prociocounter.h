@@ -21,6 +21,13 @@
 /// 发生在同一个进程里，所以按 0.5 s 采样这个计数再差分，就能得到**真正
 /// 500 ms 分辨率**的实时读写速度 —— 比解析 fio 自己 1 Hz 的 ETA 输出更细，
 /// 也避开了 fio ETA 前 3 秒不输出的空窗期。
+///
+/// Linux 上等价物是 /proc/<pid>/io：read_bytes / write_bytes 就是块层的
+/// 实际传输字节数。/proc/<pid>/io 是**整个线程组**的合计（内核在 tgid
+/// 视角上会把每个线程的 ioac 加起来），所以和 Windows 一样，前提是 fio
+/// 必须以线程模式跑 —— 这正是 job 命令行里固定带 --thread 的原因
+/// （见 FioConfig::commonExtraArguments）。要是哪天把 --thread 去掉，
+/// Linux 上 fio 会 fork 出子进程做 I/O，父进程的计数就恒为 0 了。
 class ProcessIoCounter
 {
 public:
@@ -30,7 +37,7 @@ public:
     ProcessIoCounter(const ProcessIoCounter &) = delete;
     ProcessIoCounter &operator=(const ProcessIoCounter &) = delete;
 
-    /// 按 pid 打开进程并取得查询权限。
+    /// 按 pid 打开进程并取得查询权限（Linux 上就是记下 pid 并试读一次）。
     bool attach(qint64 processId);
     void detach();
     bool isAttached() const;
@@ -39,5 +46,6 @@ public:
     bool read(quint64 *readBytes, quint64 *writeBytes) const;
 
 private:
-    void *m_handle = nullptr;
+    void *m_handle = nullptr;   ///< Windows：进程句柄
+    qint64 m_pid = -1;          ///< Linux：/proc/<pid>/io 的那个 pid
 };

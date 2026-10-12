@@ -12,6 +12,7 @@
 
 #include "fiorunner.h"
 
+#include "fioconfig.h"
 #include "prociocounter.h"
 #include "uitext.h"
 
@@ -300,6 +301,42 @@ QString FioRunner::queryVersion(const QString &fioPath, int timeoutMs)
     }
     const QString out = QString::fromLocal8Bit(probe.readAll()).trimmed();
     return out.section(QLatin1Char('\n'), 0, 0).trimmed();
+}
+
+QStringList FioRunner::queryEngines(const QString &fioPath, int timeoutMs)
+{
+    if (fioPath.isEmpty() || !QFileInfo::exists(fioPath))
+        return QStringList();
+
+    QProcess probe;
+    probe.setProcessChannelMode(QProcess::MergedChannels);
+    probe.start(fioPath, QStringList{QStringLiteral("--enghelp")});
+    if (!probe.waitForStarted(3000))
+        return QStringList();
+    if (!probe.waitForFinished(timeoutMs)) {
+        probe.kill();
+        probe.waitForFinished(1000);
+        return QStringList();
+    }
+
+    // 输出长这样（前面还有一行 "Available IO engines:"）：
+    //     libaio
+    //     io_uring
+    //     ...
+    // 不去认那个表头，直接按"标识符"切词再挑 —— 版本之间表头措辞改过，
+    // 但引擎名本身是稳定的。挑的时候只留我们关心的候选，
+    // 免得把表头里的英文单词也当成引擎名。
+    static const QRegularExpression tokenRe(QStringLiteral("[A-Za-z0-9_]+"));
+    const QString out = QString::fromLocal8Bit(probe.readAll());
+
+    QStringList found;
+    QRegularExpressionMatchIterator it = tokenRe.globalMatch(out);
+    while (it.hasNext()) {
+        const QString token = it.next().captured(0).toLower();
+        if (FioConfig::candidateIoEngines().contains(token) && !found.contains(token))
+            found << token;
+    }
+    return found;
 }
 
 bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,

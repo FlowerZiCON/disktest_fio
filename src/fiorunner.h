@@ -127,6 +127,14 @@ public:
     /// 同步取 fio 版本（fio --version）。
     static QString queryVersion(const QString &fioPath, int timeoutMs = 5000);
 
+    /// 同步问一次 fio 支持哪些 IO 引擎（`fio --enghelp`），返回引擎名列表。
+    /// 问不出来（fio 不在 / 超时 / 输出看不懂）返回空列表。
+    ///
+    /// 用途：引擎不能再写死了。Windows 上固定 windowsaio，但 Linux 上
+    /// 发行版编的 fio 未必带 libaio，界面得在开测前探一次、
+    /// 挑一个真正存在的引擎（见 FioConfig::candidateIoEngines）。
+    static QStringList queryEngines(const QString &fioPath, int timeoutMs = 5000);
+
 signals:
     /// 每 0.5 s 一次：区间 [intervalStartSec, +intervalSec) 的读/写速度（字节/秒）。
     /// 时间基准是该阶段 fio 进程启动的瞬间，给的是区间起点，所以首点落在 0 秒。

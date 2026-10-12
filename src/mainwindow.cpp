@@ -58,8 +58,8 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStorageInfo>
-#include <QTableWidget>
-#include <QTableWidgetItem>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QTimer>
@@ -68,6 +68,10 @@
 
 #include <algorithm>
 #include <cstdio>
+
+#ifndef Q_OS_WIN
+#  include <unistd.h>   // fsync：预分配写完必须落盘，见 preallocNextFile()
+#endif
 
 namespace {
 
@@ -119,6 +123,31 @@ QString formatDuration(qint64 seconds)
     return RunData::formatDuration(seconds);
 }
 
+/// 磁盘列表里"已用/总量"那一列的紧凑写法：两个数共用同一个单位。
+///
+/// 左栏一共才 480 px，还要塞下树形缩进和"可测目录"，所以这里不能写成
+/// "197.7 GiB / 233.2 GiB"（光这一格就要 150 px）。精确值走 tooltip。
+QString compactSizePair(quint64 used, quint64 total)
+{
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+    double scaledTotal = static_cast<double>(total);
+    int unit = 0;
+    while (scaledTotal >= 1024.0 && unit < 5) {
+        scaledTotal /= 1024.0;
+        ++unit;
+    }
+    double scaledUsed = static_cast<double>(used);
+    for (int i = 0; i < unit; ++i)
+        scaledUsed /= 1024.0;
+
+    // 小于 10 才留一位小数（"0.4/1.4 GiB"），大盘就给整数（"198/233 GiB"）
+    const int decimals = (unit == 0 || scaledTotal >= 10.0) ? 0 : 1;
+    return QStringLiteral("%1/%2 %3")
+        .arg(scaledUsed, 0, 'f', decimals)
+        .arg(scaledTotal, 0, 'f', decimals)
+        .arg(QString::fromLatin1(units[unit]));
+}
+
 /// 测试数据 CSV 的格式标记。定义在 rundata.h 里（解析那一侧也要用），
 /// 这里只是转发，免得两边各写一份字符串。
 const char *kRunDataMagic = RunData::magic();
@@ -138,15 +167,34 @@ bool isVerifyRelatedWarning(const QString &warning)
            || warning.contains(QStringLiteral("校验头不匹配"));
 }
 
-/// 把卷根路径统一成 "G:/" 的形式，好做不区分大小写的比较。
-/// 卷枚举给出的 rootPath 是 "G:/"，而用户/命令行常写成 "G:" 或 "G:\"，
-/// 直接字符串比会不相等——曾经因此让自检悄悄退回第一个分区（系统盘 C:）并往上写数据。
+/// 把卷根路径统一成可以直接做字符串比较的形式。
+///
+/// Windows：卷枚举给出的是 "G:/"，而用户/命令行常写成 "G:" 或 "G:\"，
+///          统一成"大写盘符 + /"。
+/// Linux：  QStorageInfo 给的挂载点是 "/home"、"/mnt/disk"（结尾没有 '/'），
+///          而命令行上很容易写成 "/mnt/disk/"。这里统一去掉结尾的 '/'，
+///          否则自检会判定"找不到指定分区"直接中止 ——
+///          它**故意**不肯回退到第一行（第一行常常是系统盘）。
+/// 这个不相等曾经让自检悄悄退回第一个分区（系统盘 C:）并往上写数据。
 QString normalizedRoot(const QString &path)
 {
-    const QString s = QDir::fromNativeSeparators(path.trimmed());
+    QString s = QDir::cleanPath(QDir::fromNativeSeparators(path.trimmed()));
+#ifdef Q_OS_WIN
     if (s.size() >= 2 && s.at(1) == QLatin1Char(':'))
         return s.left(2).toUpper() + QLatin1Char('/');
+#endif
     return s;
+}
+
+/// 随程序发布的那份 fio 的文件名：Windows 上是 fio.exe，Linux 上就是 fio。
+/// 找"自带的那份"和打包脚本必须用同一个名字（CMake 那边是 FIO_EXE_NAME）。
+QString fioExecutableName()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("fio.exe");
+#else
+    return QStringLiteral("fio");
+#endif
 }
 
 } // namespace
@@ -216,11 +264,13 @@ void MainWindow::buildUi()
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // 420~470：左栏是"卡片式表单"，本身不需要太宽；
+    // 420~520：左栏是"卡片式表单"，本身不需要太宽；
     // 原来能撑到 520，多出来的宽度全是从右边那排状态卡片和图表上抠走的。
-    // 收窄之后窗口整体也能跟着变窄，而右侧六张卡片不用再被裁掉。
-    scroll->setMinimumWidth(420);
-    scroll->setMaximumWidth(470);
+    // 但这次不能再压了：磁盘列表现在是**两层的树**（磁盘 → 文件系统），
+    // 缩进 + "可测目录"列在 420 宽度下会被截成 "/home/mo…"，
+    // 而那一列恰恰是用户判断"会往哪写"的依据。480 是实测能完整显示的下限。
+    scroll->setMinimumWidth(480);
+    scroll->setMaximumWidth(520);
 
     rootLayout->addWidget(scroll);
     rootLayout->addWidget(buildChartPanel(), 1);
@@ -280,13 +330,17 @@ void MainWindow::buildParamPanel(QWidget *panel)
     m_versionDebounce->setSingleShot(true);
     m_versionDebounce->setInterval(400);
     connect(m_versionDebounce, &QTimer::timeout, this, [this]() {
-        const QString version = FioRunner::queryVersion(m_fioPathEdit->text().trimmed());
         const QString path = m_fioPathEdit->text().trimmed();
+        const QString version = FioRunner::queryVersion(path);
         m_fioVersionLabel->setText(
             version.isEmpty()
                 ? kFioEngineNotFound
                 : kFioEngineVersion.arg(version, fioLooksBundled(path) ? kFioBundled
                                                                        : kFioFromSystem));
+        // 顺手把 IO 引擎定下来：这里已经为了版本号 spawn 过一次 fio 了，
+        // 再问一次 --enghelp 成本很低，但能让"用哪个引擎"跟着实际的 fio 走
+        // （发行版编的 fio 未必带 libaio）。
+        applyDetectedIoEngine(path);
     });
     connect(m_fioPathEdit, &QLineEdit::textChanged, this, [this](const QString &) {
         m_versionDebounce->start();
@@ -324,13 +378,16 @@ void MainWindow::buildParamPanel(QWidget *panel)
     m_roundSpin->setToolTip(kRoundsTip);
     loadForm->addRow(kLabelRounds, m_roundSpin);
 
-    // IO 引擎与直接 I/O 都不再提供选择：Windows 上只有 windowsaio 支持直接 I/O，
-    // 而直接 I/O 才能绕过系统缓存、测到磁盘本身。这里只做静态说明。
-    auto *ioModeLabel = new QLabel(
+    // IO 引擎与直接 I/O 都不提供选择：直接 I/O 才能绕过系统缓存、测到磁盘本身，
+    // 而能用哪个引擎是平台（和这份 fio 的编译选项）决定的 ——
+    // Windows 上只有 windowsaio 支持 direct=1，Linux 上 libaio / io_uring / psync
+    // 都支持 O_DIRECT。这里只做静态说明，具体引擎由
+    // applyDetectedIoEngine() 在探测到 fio 之后填进来。
+    m_ioModeLabel = new QLabel(
         kIoModeDirectFmt.arg(FioConfig::ioEngine()), loadBox);
-    ioModeLabel->setStyleSheet(QStringLiteral("color:#666;"));
-    ioModeLabel->setToolTip(kIoModeTip);
-    loadForm->addRow(kLabelIoMode, ioModeLabel);
+    m_ioModeLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    m_ioModeLabel->setToolTip(kIoModeTip);
+    loadForm->addRow(kLabelIoMode, m_ioModeLabel);
 
     // ---- 阶段与校验 ----
     auto *phaseBox = new QGroupBox(kGroupPhases, panel);
@@ -403,7 +460,14 @@ void MainWindow::buildParamPanel(QWidget *panel)
     m_logView->setMinimumHeight(190);
     m_logView->setPlaceholderText(kLogPlaceholder);
     QFont logFont = m_logView->font();
-    logFont.setFamilies({QStringLiteral("Consolas"), QStringLiteral("Courier New")});
+    // 等宽字体：Windows 上是 Consolas，Linux 上一般只有 DejaVu / Liberation，
+    // 一个都对不上时会落到 Qt 的默认字体（可能是比例字体，日志就列不齐了）。
+    logFont.setFamilies({QStringLiteral("Consolas"),
+                         QStringLiteral("DejaVu Sans Mono"),
+                         QStringLiteral("Noto Sans Mono"),
+                         QStringLiteral("Liberation Mono"),
+                         QStringLiteral("Courier New"),
+                         QStringLiteral("monospace")});
     logFont.setPointSizeF(qMax(8.0, logFont.pointSizeF() - 1.0));
     m_logView->setFont(logFont);
     logLayout->addWidget(m_logView);
@@ -417,26 +481,32 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(4);
 
-    m_driveTable = new QTableWidget(0, 4, driveBox);
-    m_driveTable->setHorizontalHeaderLabels(
-        {kColLetter, kColDevice,
-         kColUsedTotal, kColUsage});
-    m_driveTable->verticalHeader()->setVisible(false);
-    m_driveTable->setShowGrid(false);
-    m_driveTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_driveTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_driveTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_driveTable->setAlternatingRowColors(true);
-    m_driveTable->setMaximumHeight(126);
+    // 两层树：顶层是物理磁盘（只当分组标题，**不可选**），
+    // 它下面挂着这台机器上能测的文件系统 —— 只有文件系统那一层可选，
+    // 因为本工具只能测文件系统（裸设备一律拒绝）。
+    m_driveTree = new QTreeWidget(driveBox);
+    m_driveTree->setColumnCount(4);
+    m_driveTree->setHeaderLabels(
+        {kColDeviceTree, kColTargetDir, kColUsedTotal, kColUsage});
+    m_driveTree->setRootIsDecorated(true);
+    m_driveTree->setItemsExpandable(true);
+    m_driveTree->setExpandsOnDoubleClick(false);
+    m_driveTree->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_driveTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_driveTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_driveTree->setAlternatingRowColors(true);
+    m_driveTree->setUniformRowHeights(true);
+    m_driveTree->setMaximumHeight(170);
     // 选中高亮改成浅蓝色（默认的系统高亮偏深，和交替行底色对比太强）
-    m_driveTable->setStyleSheet(QStringLiteral(
-        "QTableWidget::item:selected { background: #cce8ff; color: #10314f; }"
-        "QTableWidget::item:selected:active { background: #b6dcff; color: #10314f; }"));
-    m_driveTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_driveTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_driveTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_driveTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    connect(m_driveTable, &QTableWidget::itemSelectionChanged,
+    m_driveTree->setStyleSheet(QStringLiteral(
+        "QTreeWidget::item:selected { background: #cce8ff; color: #10314f; }"
+        "QTreeWidget::item:selected:active { background: #b6dcff; color: #10314f; }"));
+    m_driveTree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
+    m_driveTree->header()->resizeSection(0, 148);
+    m_driveTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_driveTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_driveTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    connect(m_driveTree, &QTreeWidget::itemSelectionChanged,
             this, &MainWindow::onDriveSelectionChanged);
 
     m_targetLabel = new QLabel(driveBox);
@@ -447,6 +517,9 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     auto *hint = new QLabel(kDriveHintClick, driveBox);
     hint->setStyleSheet(QStringLiteral("color:#666;"));
     hint->setWordWrap(true);
+    auto *browse = new QPushButton(kBtnBrowseDir, driveBox);
+    browse->setToolTip(kDlgBrowseTargetHint.arg(FioConfig::folderName()));
+    connect(browse, &QPushButton::clicked, this, &MainWindow::onBrowseTargetDir);
     auto *refresh = new QPushButton(kBtnRefresh, driveBox);
     refresh->setMaximumWidth(70);
     connect(refresh, &QPushButton::clicked, this, [this]() {
@@ -455,9 +528,10 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
         updateReadAvailability();
     });
     hintRow->addWidget(hint, 1);
+    hintRow->addWidget(browse);
     hintRow->addWidget(refresh);
 
-    layout->addWidget(m_driveTable);
+    layout->addWidget(m_driveTree);
     layout->addWidget(m_targetLabel);
     layout->addLayout(hintRow);
 }
@@ -650,7 +724,7 @@ void MainWindow::buildMenu()
 FioConfig MainWindow::configFromUi() const
 {
     FioConfig cfg;
-    cfg.targetRoot  = selectedRoot();
+    cfg.targetDir   = m_targetDir;
     cfg.testMode    = currentTestMode();
     if (m_perfSizeCombo)
         cfg.perfDataBytes = m_perfSizeCombo->currentData().toLongLong();
@@ -728,30 +802,29 @@ void MainWindow::resetToDefaultSettings()
     // （漏了的症状：exe 旁边明明放着 fio，界面却是"引擎: 未找到"）。
     m_fioPathEdit->setText(locateFioExecutable());
 
-    // 盘符**不预选**：交给用户自己挑，避免默认落在系统盘上。
-    // 清掉可能残留的 preferredRoot，再让 refreshDriveList 跳过"回退到第一行"。
-    if (m_driveTable) {
-        m_driveTable->setProperty("preferredRoot", QString());
-        m_driveTable->clearSelection();
-    }
+    // 目标**不预选**：交给用户自己挑，避免默认落在系统盘上。
+    // 目标目录也一并清掉，让 refreshDriveList 一行都不选。
+    m_targetDir.clear();
+    if (m_driveTree)
+        m_driveTree->clearSelection();
 }
 
 namespace {
 
-/// 这个 fio 是不是"程序自带的那一份"（就在 exe 旁边的 fio\ 里）。
+/// 这个 fio 是不是"程序自带的那一份"（就在程序目录旁边的 fio/ 里）。
 /// 只影响界面标签显示（自带/系统），不影响用哪个。
 bool fioLooksBundled(const QString &path)
 {
     const QString clean = QDir::cleanPath(path);
-    if (!clean.endsWith(QStringLiteral("/fio/fio.exe"), Qt::CaseInsensitive))
+    if (!clean.endsWith(QStringLiteral("/fio/") + fioExecutableName(), Qt::CaseInsensitive))
         return false;
     return clean.startsWith(QDir::cleanPath(QCoreApplication::applicationDirPath())
                             + QLatin1Char('/'));
 }
 
-/// 程序自带的 fio：**只看 exe 所在目录**，找不到就返回空。
+/// 程序自带的 fio：**只看程序所在目录**，找不到就返回空。
 ///
-/// 以前这里会从 exe 目录往上翻最多 5 层，去找源码树里的 third_party/fio。
+/// 以前这里会从程序目录往上翻最多 5 层，去找源码树里的 third_party/fio。
 /// 那等于拿程序目录当起点扫盘，装到 D:\Tools\ 这类地方时行为完全不可预测
 /// （测的是哪份 fio 取决于目录长什么样）。现在只认确定的位置。
 ///
@@ -760,7 +833,7 @@ bool fioLooksBundled(const QString &path)
 QString bundledFioPathFor(const QString &appDir)
 {
     const QString candidate =
-        QDir(appDir).absoluteFilePath(QStringLiteral("fio/fio.exe"));
+        QDir(appDir).absoluteFilePath(QStringLiteral("fio/") + fioExecutableName());
     return QFileInfo::exists(candidate) ? QDir::cleanPath(candidate) : QString();
 }
 
@@ -769,10 +842,11 @@ QString bundledFioPathFor(const QString &appDir)
 QString MainWindow::locateFioExecutable() const
 {
     // 查找顺序，只有两步，找不到就**不猜**：
-    //   1. 程序所在目录里的 fio\fio.exe      （随程序发出去的那份，最可信）
-    //   2. 系统 PATH 里的 fio                （用户自己装的那份）
+    //   1. 程序所在目录里的 fio/fio.exe（Linux 上是 fio/fio）  —— 随程序发出去的那份，最可信
+    //   2. 系统 PATH 里的 fio                                    —— 用户自己装的那份
     // 都没有就返回空，界面上留空由用户点「浏览…」指定——
-    // 不去猜 C:\Program Files\fio 之类的位置，更不扫盘。
+    // 不去猜 C:\Program Files\fio、/usr/local/bin 之类的位置，更不扫盘。
+    // Linux 上发行版装的 fio 就在 /usr/bin/fio，正好走第 2 条。
     const QString bundled = bundledFioPathFor(QCoreApplication::applicationDirPath());
     if (!bundled.isEmpty())
         return bundled;
@@ -782,6 +856,23 @@ QString MainWindow::locateFioExecutable() const
         return QDir::cleanPath(onPath);
 
     return QString();
+}
+
+void MainWindow::applyDetectedIoEngine(const QString &fioPath)
+{
+    // 引擎不能再写死：Windows 固定 windowsaio，Linux 得看这份 fio 到底编了哪些。
+    // 探测失败（没有 fio、超时、输出看不懂）就**保持平台默认值**，
+    // 不要因为探测不出来就把界面搞成"没有引擎可用"。
+    const QStringList available = FioRunner::queryEngines(fioPath);
+
+    QString picked = FioConfig::defaultIoEngine();
+    if (!available.isEmpty()) {
+        picked = available.first();   // queryEngines 只挑候选，顺序就是优先级
+    }
+    FioConfig::setIoEngine(available.isEmpty() ? QString() : picked);
+
+    if (m_ioModeLabel)
+        m_ioModeLabel->setText(kIoModeDirectFmt.arg(FioConfig::ioEngine()));
 }
 
 void MainWindow::setFioPath(const QString &path)
@@ -836,135 +927,226 @@ void MainWindow::applyDensity()
     m_chart->setLineStep(step);
 }
 
-// ---------------------------------------------------------------- 目标分区
+// ---------------------------------------------------------------- 目标位置
+//
+// 目标是**一个目录**，不是"某个分区/盘符的根"。
+// 容量与"写满"针对的始终是这个目录**所在的文件系统**，所以同一个文件系统里
+// 任意一个可写目录都等价 —— 系统盘的 "/" 常常只有 root 能写，
+// 但 /home/<用户> 就在同一个文件系统上，选它就等于测系统盘，而且不用提权。
 
-QString MainWindow::selectedRoot() const
+QString MainWindow::selectedTargetDir() const
 {
-    const QList<QTableWidgetItem *> selected = m_driveTable->selectedItems();
+    if (!m_driveTree)
+        return QString();
+    const QList<QTreeWidgetItem *> selected = m_driveTree->selectedItems();
     if (selected.isEmpty())
         return QString();
-    QTableWidgetItem *first = m_driveTable->item(selected.first()->row(), 0);
-    return first ? first->data(Qt::UserRole).toString() : QString();
+    // 磁盘那一层、以及"测不了"的分区都设成了不可选，
+    // 所以能选中的一定是可测的文件系统那一行。
+    return selected.first()->data(0, Qt::UserRole).toString();
+}
+
+void MainWindow::setTargetDir(const QString &dir)
+{
+    m_targetDir = QDir::cleanPath(dir.trimmed());
+    if (m_targetDir == QLatin1String("."))
+        m_targetDir.clear();
+    refreshDriveList();
+}
+
+void MainWindow::onBrowseTargetDir()
+{
+    const QString start = m_targetDir.isEmpty() ? QDir::homePath() : m_targetDir;
+    const QString dir = QFileDialog::getExistingDirectory(this, kDlgBrowseTargetTitle, start);
+    if (dir.isEmpty())
+        return;
+
+    // 先确认这个目录真的能建东西：不能建就当场说清楚，
+    // 别等 fio 跑起来才以一个看不懂的权限错误收场。
+    if (!canUseAsTestDir(dir)) {
+        reportProblem(kDlgBrowseTargetTitle, kErrBrowseDirNotWritable.arg(dir));
+        return;
+    }
+    quint64 total = 0;
+    quint64 free = 0;
+    if (!queryVolumeSpace(dir, &total, &free)) {
+        reportProblem(kDlgBrowseTargetTitle, kErrBrowseDirNotMounted.arg(dir));
+        return;
+    }
+    setTargetDir(dir);
 }
 
 bool MainWindow::refreshDriveList(bool startup)
 {
-    if (!m_driveTable)
+    if (!m_driveTree)
         return false;
 
-    // 关键：**优先沿用当前已经选中的分区**。
-    // 之前这里只看配置里存的值，于是每次刷新（测试结束、点刷新按钮）都会掉回第一个分区。
-    // 只有当前选中的盘真的不在了（被拔掉/卸载），才回退到第一行。
-    QString wantRoot = !m_selfTestTarget.isEmpty() ? m_selfTestTarget : selectedRoot();
-    if (wantRoot.isEmpty())
-        wantRoot = m_driveTable->property("preferredRoot").toString();
+    // 自检第一次进来时，目标目录来自命令行
+    if (m_targetDir.isEmpty() && !m_selfTestTarget.isEmpty())
+        m_targetDir = QDir::cleanPath(m_selfTestTarget);
 
-    const QList<VolumeEntry> volumes = enumerateVolumes();
-    // 记下这次到底枚举到了哪些卷，写进自检报告 —— "找不到目标分区"时全靠它排查
-    m_volumeSummary.clear();
-    for (const VolumeEntry &volume : volumes) {
-        m_volumeSummary << kVolumeSummaryLine
-                               .arg(volume.rootPath, volume.deviceName)
-                               .arg(volume.usedPercent(), 0, 'f', 1);
+    const QList<DiskEntry> disks = enumerateDisks(&m_ignoredVolumes);
+
+    // 记下这次到底枚举到了哪些盘 / 分区，写进自检报告 ——
+    // "找不到目标"的时候全靠它排查。
+    m_diskSummary.clear();
+    for (const DiskEntry &disk : disks) {
+        m_diskSummary << kDiskSummaryLine.arg(disk.displayLine(), formatBytes(disk.bytesTotal));
+        for (const FileSystemEntry &fs : disk.fileSystems) {
+            m_diskSummary << (fs.testable()
+                                  ? kFsSummaryLine.arg(fs.displayLine(), fs.suggestedDir)
+                                  : kFsSummaryNoDir.arg(fs.displayLine(), fs.unavailableReason));
+        }
     }
 
-    // 重建期间挡住 itemSelectionChanged：setRowCount(0) 会清空选中并立刻发信号，
-    // 那一刻"没选中分区"会被 onDriveSelectionChanged 当成"分区里没有测试文件"，
-    // 进而把「读取」的勾选取消掉。重建完成、选中恢复之后再解挡。
+    // 重建期间挡住 itemSelectionChanged：clear() 会清空选中并立刻发信号，
+    // 那一刻"没选中"会被 onDriveSelectionChanged 当成"目标变了"。
+    // 重建完成、选中恢复之后再解挡。
     m_refreshingDrives = true;
-    m_driveTable->setRowCount(0);
+    m_driveTree->clear();
 
-    bool found = false;
-    for (const VolumeEntry &volume : volumes) {
-        const double percent = volume.usedPercent();
-        const QString line = volume.displayLine();
+    int selectableRows = 0;
+    QTreeWidgetItem *matching = nullptr;
 
-        QStringList details;
-        if (!volume.label.isEmpty())
-            details << kVolumeLabelFmt.arg(volume.label);
-        if (!volume.fileSystem.isEmpty())
-            details << kVolumeFsFmt.arg(volume.fileSystem);
-        if (!volume.typeText.isEmpty())
-            details << kVolumeTypeFmt.arg(volume.typeText);
-        const QString tooltip = details.isEmpty()
-            ? line
-            : line + QLatin1Char('\n') + details.join(QStringLiteral("    "));
+    for (const DiskEntry &disk : disks) {
+        // ---- 第一层：物理磁盘，只当分组标题 ----
+        auto *diskItem = new QTreeWidgetItem(m_driveTree);
+        diskItem->setText(0, disk.nameLine());
+        // 标记单独占一列：第一列宽度紧，写在里面会被省略号吃掉，
+        // 而"[系统盘]"恰恰是防止顺手把系统盘写掉的那一眼。
+        QStringList diskTags;
+        if (disk.isSystemDisk)
+            diskTags << kDiskSystemTag;
+        if (disk.isVirtual)
+            diskTags << kDiskVirtualTag;
+        diskItem->setText(1, diskTags.join(QLatin1Char(' ')));
+        diskItem->setText(2, formatBytes(disk.bytesTotal));
+        diskItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+        QFont diskFont = diskItem->font(0);
+        diskFont.setBold(true);
+        diskItem->setFont(0, diskFont);
 
-        const int row = m_driveTable->rowCount();
-        m_driveTable->insertRow(row);
+        QStringList diskTips;
+        if (!disk.model.isEmpty())
+            diskTips << disk.model;
+        if (disk.isSystemDisk)
+            diskTips << kDiskSystemTag;
+        if (disk.isVirtual)
+            diskTips << kDiskVirtualTag;
+        diskItem->setToolTip(0, diskTips.join(QLatin1Char('\n')));
+        // 磁盘这一层**不可选**：能测的永远是它下面的某个文件系统
+        diskItem->setFlags(diskItem->flags() & ~Qt::ItemIsSelectable);
 
-        const QStringList cells = {
-            volume.letter,
-            volume.deviceName,
-            QStringLiteral("%1 / %2").arg(formatBytes(volume.bytesUsed()),
-                                          formatBytes(volume.bytesTotal)),
-            QStringLiteral("%1%").arg(percent, 0, 'f', 1)
-        };
-        for (int column = 0; column < cells.size(); ++column) {
-            auto *item = new QTableWidgetItem(cells.at(column));
-            item->setToolTip(tooltip);
-            if (column == 0) {
-                item->setData(Qt::UserRole, volume.rootPath);
-                QFont font = item->font();
-                font.setBold(true);
-                item->setFont(font);
+        // ---- 第二层：这块盘上的文件系统，这才是可选的目标 ----
+        for (const FileSystemEntry &fs : disk.fileSystems) {
+            auto *fsItem = new QTreeWidgetItem(diskItem);
+            fsItem->setText(0, fs.displayLine());
+            fsItem->setText(1, fs.testable()
+                                   ? fs.suggestedDir
+                                   : QStringLiteral("✗ ") + fs.unavailableReason);
+            fsItem->setText(2, compactSizePair(fs.bytesUsed(), fs.bytesTotal));
+            fsItem->setText(3, QStringLiteral("%1%").arg(fs.usedPercent(), 0, 'f', 1));
+            fsItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+            fsItem->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            fsItem->setData(0, Qt::UserRole, fs.suggestedDir);
+            fsItem->setData(0, Qt::UserRole + 1, fs.mountPoint);
+
+            QStringList tips;
+            if (!fs.label.isEmpty())
+                tips << kVolumeLabelFmt.arg(fs.label);
+            if (!fs.fileSystem.isEmpty())
+                tips << kVolumeFsFmt.arg(fs.fileSystem);
+            if (!fs.device.isEmpty())
+                tips << kVolumeDeviceFmt.arg(fs.device);
+            if (!fs.mountPoint.isEmpty())
+                tips << kVolumeMountFmt.arg(fs.mountPoint);
+            // 列里为了放得下只写了使用率，精确数字放这儿
+            tips << kVolumeSpaceFmt.arg(formatBytes(fs.bytesUsed()),
+                                        formatBytes(fs.bytesTotal),
+                                        formatBytes(fs.bytesFree))
+                        .arg(fs.usedPercent(), 0, 'f', 1);
+            if (fs.isNetwork)
+                tips << kFsNetworkWarning;
+            if (!fs.testable())
+                tips << fs.unavailableReason;
+            fsItem->setToolTip(0, tips.join(QLatin1Char('\n')));
+
+            if (!fs.testable()) {
+                // 测不了的分区照样列出来 —— 用户至少知道"它存在，为什么测不了"。
+                // 但灰掉且不可选，免得选中一个根本测不了的目标。
+                for (int column = 0; column < 4; ++column)
+                    fsItem->setForeground(column, QColor(150, 150, 150));
+                fsItem->setFlags(fsItem->flags() & ~Qt::ItemIsSelectable);
+                continue;
             }
-            if (column >= 2)
-                item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-            if (column == 3) {
-                if (percent >= 95.0)
-                    item->setForeground(QColor(200, 40, 40));
-                else if (percent >= 85.0)
-                    item->setForeground(QColor(200, 130, 20));
-            }
-            m_driveTable->setItem(row, column, item);
-        }
 
-        if (!wantRoot.isEmpty()
-            && normalizedRoot(wantRoot) == normalizedRoot(volume.rootPath)) {
-            m_driveTable->selectRow(row);
-            found = true;
+            ++selectableRows;
+            const double percent = fs.usedPercent();
+            if (percent >= 95.0)
+                fsItem->setForeground(3, QColor(200, 40, 40));
+            else if (percent >= 85.0)
+                fsItem->setForeground(3, QColor(200, 130, 20));
+
+            // 目标目录落在哪个文件系统上就选哪一行。
+            // 比的是 st_dev（同一个文件系统），所以 bind mount、btrfs 子卷
+            // 这类"同一个文件系统挂在多处"的情况也判得准。
+            if (matching == nullptr && !m_targetDir.isEmpty()
+                && sameFileSystem(m_targetDir, fs.mountPoint)) {
+                matching = fsItem;
+            }
         }
+        diskItem->setExpanded(true);
     }
 
-    if (!found && m_driveTable->rowCount() > 0) {
+    // 列表里少了 X:/Y: 这种盘时，鼠标放到列表上就能知道是被规则挡了、不是没认出来
+    if (m_ignoredVolumes.isEmpty())
+        m_driveTree->setToolTip(QString());
+    else
+        m_driveTree->setToolTip(
+            kIgnoredListTip.arg(m_ignoredVolumes.join(QStringLiteral("  "))));
+
+    if (matching != nullptr) {
+        m_driveTree->setCurrentItem(matching);
+        matching->setSelected(true);
+    }
+
+    m_refreshingDrives = false;
+
+    if (matching == nullptr && selectableRows > 0) {
         if (!m_selfTestTarget.isEmpty()) {
-            // 自检明确指定了目标分区却没找到：**绝不能悄悄退回第一行**。
-            // 第一行很可能是系统盘，之前就这样误写过 C:。
-            // 这里什么都不选，runSelfTest 会发现没选中而中止。
-            statusBar()->showMessage(
-                kSelfTestTargetMissing.arg(m_selfTestTarget));
+            // 自检明确指定了目标目录却没匹配上：**绝不能悄悄换一个** ——
+            // 换到另一块盘上的代价是往那块盘上真写数据。
+            statusBar()->showMessage(kSelfTestTargetMissing.arg(m_selfTestTarget));
         } else if (startup) {
-            // **启动时不预选任何盘**：列表照常列出来，但一行都不选。
+            // **启动时不预选任何分区**：列表照常列出来，但一行都不选。
             // 第一行常常是系统盘，默认选中它意味着"打开程序就能直接点开始测"，
             // 很容易顺手把系统盘写了。选盘这件事必须由用户主动做一次。
             statusBar()->showMessage(kStatusSelectDriveHint);
-        } else {
-            // 运行期间的刷新（测试结束、点刷新、拔盘）仍然回退到第一行，
-            // 保持原来的行为：这种情况下用户已经知道自己在操作哪块盘了。
-            m_driveTable->selectRow(0);
-            if (!wantRoot.isEmpty()) {
-                statusBar()->showMessage(
-                    kTargetRootChanged
-                        .arg(wantRoot, m_driveTable->item(0, 0)->data(Qt::UserRole).toString()));
-            }
         }
     }
 
-    // 选中已经恢复，解挡；此时再让依赖"当前选中分区"的界面刷新一次
-    m_refreshingDrives = false;
+    // 目标目录要是已经没了（盘拔了、被卸载了），明确清掉并说明。
+    // **不**回退到第一行：那是另一块盘，用户根本不会注意到目标被换了。
+    // 自检那条路径有自己的"找不到目标"提示，别在这里覆盖掉它。
+    if (m_selfTestTarget.isEmpty() && !m_targetDir.isEmpty()
+        && !QFileInfo(m_targetDir).isDir()) {
+        statusBar()->showMessage(kTargetGone.arg(m_targetDir));
+        m_targetDir.clear();
+    }
+
+    // 选中已经恢复；此时再让依赖"当前目标"的界面刷新一次
     if (!m_runner->isBusy()) {
         refreshTargetInfo();
         updateReadAvailability();
     }
 
-    return m_driveTable->rowCount() > 0;
+    return selectableRows > 0;
 }
 
 void MainWindow::refreshTargetInfo()
 {
     const FioConfig cfg = configFromUi();
-    if (cfg.targetRoot.isEmpty()) {
+    if (cfg.targetDir.isEmpty()) {
         m_targetLabel->setText(kTargetNotSelected);
         m_diskBar->setValue(0);
         m_diskBar->setStyleSheet(QString());
@@ -978,8 +1160,8 @@ void MainWindow::refreshTargetInfo()
 
     quint64 total = 0;
     quint64 free = 0;
-    if (!queryVolumeSpace(cfg.targetRoot, &total, &free)) {
-        m_targetLabel->setText(kErrReadCapacity.arg(cfg.targetRoot));
+    if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
+        m_targetLabel->setText(kErrReadCapacity.arg(cfg.targetDir));
         return;
     }
 
@@ -987,6 +1169,24 @@ void MainWindow::refreshTargetInfo()
 
     const FioConfig::FilePlan plan = cfg.planFiles(total, free);
     QString text = kTargetFolderFmt.arg(QDir::toNativeSeparators(cfg.testFolder()));
+
+    // **必须把"这个目录落在哪个文件系统上"摊开说**：
+    // 容量和"写满"针对的是整个文件系统，不是用户选的那个目录。
+    // 选了 /home/xxx 却把整个 / 写满，不说清楚就是个坑。
+    const QStorageInfo info(cfg.targetDir);
+    if (info.isValid() && info.isReady()) {
+        const QString device = info.device().isEmpty() ? kTextUnknownDevice : info.device();
+        text += kTargetFilesystemFmt.arg(device, info.fileSystemType(), info.rootPath());
+        if (normalizedRoot(info.rootPath()) != normalizedRoot(cfg.targetDir)) {
+            text += kTargetFillWholeFmt.arg(info.displayName().isEmpty()
+                                                ? info.rootPath()
+                                                : info.displayName(),
+                                            formatBytes(quint64(info.bytesTotal())));
+        }
+        if (isNetworkFileSystem(info.fileSystemType()))
+            text += kTargetNetworkWarn;
+    }
+
     if (cfg.testMode == FioConfig::TestMode::Performance) {
         // 性能测试固定单文件、大小是用户选的，"将写入 N 个文件"那句在这里没意义，不显示。
         const FioConfig::FilePlan perfPlan = FioConfig::planFilesForSize(cfg.perfDataBytes);
@@ -1257,8 +1457,8 @@ QString MainWindow::currentModeName() const
 void MainWindow::switchPerfResultsTo(const QString &root)
 {
     // 先把当前盘的结果存回去（正在跑测试时不保存，那时显示的就是本盘数据）
-    if (!m_perfResultsRoot.isEmpty() && !m_runner->isBusy()) {
-        PerfResult &stored = m_perfResults[m_perfResultsRoot];
+    if (!m_perfResultsTarget.isEmpty() && !m_runner->isBusy()) {
+        PerfResult &stored = m_perfResults[m_perfResultsTarget];
         for (int i = 0; i < 4; ++i) {
             stored.readValue[i] = m_perfReadCells[i] ? m_perfReadCells[i]->value() : -1.0;
             stored.writeValue[i] = m_perfWriteCells[i] ? m_perfWriteCells[i]->value() : -1.0;
@@ -1267,7 +1467,7 @@ void MainWindow::switchPerfResultsTo(const QString &root)
         }
     }
 
-    m_perfResultsRoot = root;
+    m_perfResultsTarget = root;
     const PerfResult stored = m_perfResults.value(root);
 
     for (int i = 0; i < 4; ++i) {
@@ -1289,7 +1489,7 @@ void MainWindow::switchPerfResultsTo(const QString &root)
     // 图表归属：只有性能模式才"跟着盘走"（结果本来就是按盘存的）。
     // 可靠性模式的归属由"在哪块盘上跑完的"决定，不在这里改。
     if (currentTestMode() == FioConfig::TestMode::Performance) {
-        m_chartOwnerRoot = root;
+        m_chartOwnerTarget = root;
         m_chartOwnerMode = FioConfig::TestMode::Performance;
 
         int firstWithData = -1;
@@ -1307,23 +1507,23 @@ void MainWindow::switchPerfResultsTo(const QString &root)
 
 void MainWindow::updateChartPlaceholder()
 {
-    // 只有一条规则：**当前模式 + 当前盘有没有数据**。
+    // 只有一条规则：**当前模式 + 当前目标有没有数据**。
     // 从文件打开的历史数据走独立窗口，和这里无关（所以这里不再有"加载来的数据"分支）。
-    const QString root = selectedRoot();
+    const QString target = m_targetDir;
     const bool perf = currentTestMode() == FioConfig::TestMode::Performance;
     bool hasData = false;
 
     if (perf) {
-        const PerfResult stored = m_perfResults.value(root);
+        const PerfResult stored = m_perfResults.value(target);
         for (int i = 0; i < 4 && !hasData; ++i) {
             hasData = !stored.readTrace[i].isEmpty() || !stored.writeTrace[i].isEmpty();
         }
     } else {
-        // 可靠性：图表里的数据必须是"在这块盘上跑出来的"
+        // 可靠性：图表里的数据必须是"在这个目标上跑出来的"
         hasData = !m_readSamples.isEmpty()
                   && m_chartOwnerMode == FioConfig::TestMode::Reliability
-                  && !m_chartOwnerRoot.isEmpty()
-                  && normalizedRoot(m_chartOwnerRoot) == normalizedRoot(root);
+                  && !m_chartOwnerTarget.isEmpty()
+                  && normalizedRoot(m_chartOwnerTarget) == normalizedRoot(target);
     }
 
     m_chartStack->setCurrentIndex(hasData ? 1 : 0);
@@ -1335,10 +1535,16 @@ void MainWindow::onDriveSelectionChanged()
     if (m_refreshingDrives)
         return;
 
-    // 换了目标盘，之前确认过的"覆盖"就不再适用了
+    // 选中的那一行给出的就是"这个文件系统上该往哪写"
+    const QString dir = selectedTargetDir();
+    if (dir.isEmpty())
+        return;   // 磁盘行和"测不了"的行都不可选，这里是兜底
+
+    m_targetDir = dir;
+    // 换了目标，之前确认过的"覆盖"就不再适用了
     m_overwriteConfirmedFor.clear();
-    // 结果按盘分开：切过去先把这个盘已经测出来的数据显示出来（没测过就是空的）
-    switchPerfResultsTo(selectedRoot());
+    // 结果按目标分开：切过去先把这个目标已经测出来的数据显示出来（没测过就是空的）
+    switchPerfResultsTo(m_targetDir);
     if (m_runner->isBusy())
         return;
     refreshTargetInfo();
@@ -1359,7 +1565,7 @@ void MainWindow::onBrowseFio()
 void MainWindow::onOpenTestDirectory()
 {
     const FioConfig cfg = configFromUi();
-    if (cfg.targetRoot.isEmpty()) {
+    if (cfg.targetDir.isEmpty()) {
         reportProblem(kErrNoDriveSelected,
                       kErrNoDriveSelectedDetail);
         return;
@@ -1376,7 +1582,7 @@ void MainWindow::onCleanupTestFiles()
         return;
     }
     const FioConfig cfg = configFromUi();
-    if (cfg.targetRoot.isEmpty())
+    if (cfg.targetDir.isEmpty())
         return;
 
     const QString folder = cfg.testFolder();
@@ -1500,7 +1706,7 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
                                : RunData::Mode::Reliability));
     param(QStringLiteral("mode"), m_activeConfig.modeText());
     param(QStringLiteral("mode_key"), FioConfig::modeKey(m_activeConfig.mode));
-    param(QStringLiteral("target"), m_activeConfig.targetRoot);
+    param(QStringLiteral("target"), m_activeConfig.targetDir);
     param(QStringLiteral("folder"), QDir::toNativeSeparators(m_activeConfig.testFolder()));
     param(QStringLiteral("block_size"), m_activeConfig.blockSize());
     param(QStringLiteral("ioengine"), FioConfig::ioEngine());
@@ -1952,7 +2158,7 @@ void MainWindow::setRunningState(bool running)
     // 测试期间把**所有**参数都锁住：两个参数页（含 读取、校验、四个测试项、数据大小）、
     // 模式单选、驱动器列表、fio 路径。之前漏了 读取 和四个测试项，测试中还能改。
     const QList<QWidget *> params = {
-        m_fioPathEdit, m_driveTable, m_paramStack,
+        m_fioPathEdit, m_driveTree, m_paramStack,
         m_modeReliabilityRadio, m_modePerfRadio
     };
     for (QWidget *widget : params) {
@@ -2031,15 +2237,18 @@ void MainWindow::onStart()
 
     FioConfig cfg = configFromUi();
 
-    // 保险丝：自检明确指定了目标盘，就绝不能跑到别的盘上去。
-    // refreshDriveList() 里已经不会静默回退到第一行，这里再核对一次，
+    // 保险丝：自检明确指定了目标，就绝不能跑到**别的文件系统**上去。
+    // 比的是"是不是同一个文件系统"而不是路径相等：目标是目录，
+    // 用户/命令行完全可能写成同一个文件系统里的另一个目录（那本来就等价），
+    // 但换到另一个文件系统就一定是写错盘了。
+    // refreshDriveList() 里已经不会静默换目标，这里再核对一次，
     // 因为"自检写错盘"的代价是往系统盘上真写数据。
     if (m_selfTestMode && !m_selfTestTarget.isEmpty()
-        && normalizedRoot(cfg.targetRoot) != normalizedRoot(m_selfTestTarget)) {
+        && !sameFileSystem(cfg.targetDir, m_selfTestTarget)) {
         abortStart(kErrTargetMismatch,
                    kMsgSelfTestTargetMismatch
                        .arg(m_selfTestTarget,
-                            cfg.targetRoot.isEmpty() ? kTextNoneInParens : cfg.targetRoot));
+                            cfg.targetDir.isEmpty() ? kTextNoneInParens : cfg.targetDir));
         return;
     }
 
@@ -2195,20 +2404,29 @@ void MainWindow::startNextRound()
         abortStart(kErrCreateFolderFailed, error, true);
         return;
     }
+    // 目录已经有了，正好在这里验一次 direct=1 能不能用（Linux 上是 O_DIRECT）。
+    // 放到"删旧文件之后、真正开跑之前"：既省得白删一遍文件，
+    // 又不会等 fio 跑起来才以一个看不懂的 "Operation not supported" 收场。
+    // Windows 上这个函数恒返回 true，等于不做事。
+    if (!supportsDirectIo(folder, &error)) {
+        abortStart(kMsgNoDirectIoTitle,
+                   kErrNoDirectIo.arg(QDir::toNativeSeparators(folder), error), true);
+        return;
+    }
     if (!oldFiles.isEmpty()) {
         if (m_currentRound > 1)
             logEvent(kLogRoundCleanNext.arg(oldFiles.count));
         else
             logEvent(kLogCleanedOldFiles.arg(oldFiles.count));
     }
-    updateDiskBarFor(cfg.targetRoot);
+    updateDiskBarFor(cfg.targetDir);
 
     // 旧文件已经删掉，现在量到的剩余空间才是这次真正能用的
     quint64 total = 0;
     quint64 free = 0;
-    if (!queryVolumeSpace(cfg.targetRoot, &total, &free)) {
+    if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
         abortStart(kErrReadCapacityFailed,
-                   kErrReadCapacity.arg(cfg.targetRoot));
+                   kErrReadCapacity.arg(cfg.targetDir));
         return;
     }
 
@@ -2493,7 +2711,7 @@ void MainWindow::onIoRate(double readBytesPerSec, double writeBytesPerSec,
 
     // 分区的占用情况跟着变，隔几拍刷一次就够了
     if (m_readSamples.size() % 4 == 0)
-        updateDiskBarFor(m_activeConfig.targetRoot);
+        updateDiskBarFor(m_activeConfig.targetDir);
 }
 
 void MainWindow::onRunnerOutput(const QString &text)
@@ -2672,12 +2890,12 @@ void MainWindow::onJobFinished(const FioResult &result)
         // 读写两趟都跑完了，换下一项
         ++m_perfQueueIndex;
         m_perfPass = 0;
-        updateDiskBarFor(m_activeConfig.targetRoot);
+        updateDiskBarFor(m_activeConfig.targetDir);
         startNextPerfItem();
         return;
     }
 
-    const QString endRoot = m_activeConfig.targetRoot;
+    const QString endRoot = m_activeConfig.targetDir;
 
     dropTrailingTailSample();
 
@@ -2949,8 +3167,8 @@ void MainWindow::startPerfRun()
     m_perfQueue = checkedPerfItems();
     m_perfQueueIndex = 0;
     // 重新测试：清掉这个盘上次的结果（其它盘的不动）
-    m_perfResultsRoot = cfg.targetRoot;
-    m_perfResults.remove(cfg.targetRoot);
+    m_perfResultsTarget = cfg.targetDir;
+    m_perfResults.remove(cfg.targetDir);
     m_perfPass = 0;
     m_perfResultCount = 0;
     resetPerfRunSamples();
@@ -2973,8 +3191,8 @@ void MainWindow::startPerfRun()
 
     quint64 total = 0;
     quint64 free = 0;
-    if (!queryVolumeSpace(cfg.targetRoot, &total, &free)) {
-        abortStart(kErrReadCapacityFailed, kErrReadCapacity.arg(cfg.targetRoot));
+    if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
+        abortStart(kErrReadCapacityFailed, kErrReadCapacity.arg(cfg.targetDir));
         return;
     }
     if (qint64(free) < plan.totalBytes + FioConfig::reserveBytes(total)) {
@@ -2984,13 +3202,15 @@ void MainWindow::startPerfRun()
         return;
     }
 
-    // 性能测试固定单文件，所以 FAT32 上 > 4 GiB 根本建不出来。
+    // 性能测试固定单文件，所以 FAT 家族上 > 4 GiB 根本建不出来。
     // 在开测前就拦下来，别等写了一半才失败、在盘上留个半截文件。
-    const QString fsName = queryFileSystem(cfg.targetRoot).toUpper();
-    if (fsName.startsWith(QStringLiteral("FAT"))
+    // 名字的两个平台叫法不一样（Windows "FAT32" / Linux "vfat"），
+    // 判定统一交给 isFatFileSystem()，别在这里自己写 startsWith。
+    const QString fsName = queryFileSystem(cfg.targetDir);
+    if (isFatFileSystem(fsName)
         && plan.totalBytes >= qint64(4) * 1024 * 1024 * 1024) {   // 4 GiB 本身也放不下
         abortStart(kMsgFat32TooBigTitle,
-                   kErrFat32TooBig.arg(QDir::toNativeSeparators(cfg.targetRoot),
+                   kErrFat32TooBig.arg(QDir::toNativeSeparators(cfg.targetDir),
                                        FioConfig::perfSizeText(plan.totalBytes)));
         return;
     }
@@ -3008,6 +3228,13 @@ void MainWindow::startPerfRun()
     }
     if (!clearTestFiles(folder, &error) || !ensureTestFolder(folder, &error)) {
         abortStart(kErrCleanupOldFailed, error, true);
+        return;
+    }
+    // 同上：性能模式也要先确认 direct=1 在这个文件系统上能用
+    // （后面预建文件要花几十秒，别等建完了才在 fio 那一步失败）。
+    if (!supportsDirectIo(folder, &error)) {
+        abortStart(kMsgNoDirectIoTitle,
+                   kErrNoDirectIo.arg(QDir::toNativeSeparators(folder), error), true);
         return;
     }
 
@@ -3138,7 +3365,7 @@ void MainWindow::preallocNextFile()
 
     if (m_preallocIndex >= m_preallocCount) {
         m_preallocTimer->stop();
-        updateDiskBarFor(cfg.targetRoot);
+        updateDiskBarFor(cfg.targetDir);
         logEvent(kLogPreallocated.arg(formatBytes(quint64(m_preallocSize * m_preallocCount))));
         logEvent(kLogPerfAllPlanned.arg(m_perfQueue.size())
                      .arg(m_perfQueue.size() * FioConfig::perfPassWallSeconds() * 2));
@@ -3187,6 +3414,16 @@ void MainWindow::preallocNextFile()
     m_preallocOffset += chunk;
 
     if (m_preallocOffset >= m_preallocSize) {
+        // Linux 上必须先把数据真正刷到盘上再 close()。
+        // 这里写的是普通缓冲写（脏页先落在页缓存里），而 fio 读的时候是
+        // direct=1（O_DIRECT），它**绕过页缓存**直接读块设备 ——
+        // 脏页还没写回时读到的就是旧内容：性能读数会虚高，
+        // 校验模式甚至会报出根本不存在的"数据不一致"。close() 只关 fd，
+        // 不保证写回，所以这里显式 fsync 一次。
+#ifndef Q_OS_WIN
+        if (m_preallocFile->handle() >= 0)
+            ::fsync(m_preallocFile->handle());
+#endif
         m_preallocFile->close();
         delete m_preallocFile;
         m_preallocFile = nullptr;
@@ -3287,7 +3524,7 @@ void MainWindow::finishWholeTest()
     // 记下图表里的曲线是"在哪块盘、哪个模式"下跑出来的。
     // 切盘或切模式时靠这两个标记判断该不该继续显示（性能和可靠性互相独立）。
     if (!m_readSamples.isEmpty()) {
-        m_chartOwnerRoot = m_activeConfig.targetRoot;
+        m_chartOwnerTarget = m_activeConfig.targetDir;
         m_chartOwnerMode = m_activeConfig.testMode;
     }
 
@@ -3317,7 +3554,7 @@ void MainWindow::finishWholeTest()
 
     QStringList summary;
     summary << kReportTestEnd;
-    summary << kReportTestPartition.arg(QDir::toNativeSeparators(m_activeConfig.targetRoot));
+    summary << kReportTestPartition.arg(QDir::toNativeSeparators(m_activeConfig.targetDir));
     summary << kReportRwMode.arg(m_activeConfig.modeText());
 
     bool allClean = true;
@@ -3492,7 +3729,7 @@ void MainWindow::runSelfTest()
     QDir().mkpath(m_selfTestOutDir);
 
     if (!m_selfTestTarget.isEmpty()) {
-        m_driveTable->setProperty("preferredRoot", m_selfTestTarget);
+        m_targetDir = QDir::cleanPath(m_selfTestTarget);
         refreshDriveList();
     }
     if (!m_selfTestModeKey.isEmpty()) {
@@ -3541,7 +3778,16 @@ void MainWindow::runSelfTest()
     if (m_selfTestPerf) {
         if (m_selfTestPerfMiB > 0) {
             const qint64 bytes = qint64(m_selfTestPerfMiB) * 1024 * 1024;
-            const int s = m_perfSizeCombo->findData(QVariant::fromValue(bytes));
+            int s = m_perfSizeCombo->findData(QVariant::fromValue(bytes));
+            if (s < 0) {
+                // 界面上只有有限的几档，而命令行允许给任意 MiB 值。
+                // 以前 findData 失败就**什么都不做**：参数被静默忽略，
+                // 自检照跑 1 GiB，报告上的数字和命令行对不上 —— 排查时
+                // 会以为是自己看错了。这里把缺的那一档补进下拉框再选中。
+                m_perfSizeCombo->addItem(FioConfig::perfSizeText(bytes),
+                                         QVariant::fromValue(bytes));
+                s = m_perfSizeCombo->count() - 1;
+            }
             if (s >= 0)
                 m_perfSizeCombo->setCurrentIndex(s);
         }
@@ -3592,12 +3838,12 @@ void MainWindow::runSelfTest()
     refreshTargetInfo();
     updateReadAvailability();
 
-    if (selectedRoot().isEmpty()) {
+    if (m_targetDir.isEmpty()) {
         m_lastError = kSelfTestTargetNotFound
                           .arg(m_selfTestTarget.isEmpty() ? kTextUnspecified
                                                           : m_selfTestTarget);
         recordOutput(kSelfTestPrefix + m_lastError);
-        for (const QString &line : m_volumeSummary)
+        for (const QString &line : m_diskSummary)
             recordOutput(kSelfTestEnumerated + line);
         logEvent(kLogErrorPrefix.arg(m_lastError), true);
         // 出报告再退出：早期中止如果什么都不留，自动化里根本看不出发生了什么
@@ -3788,7 +4034,7 @@ void MainWindow::writeSelfTestReport()
         out << kReportQpaPlatform << QApplication::platformName() << "\n";
         out << kReportFioVersion
             << (m_fioVersionLabel->text().isEmpty() ? kTextUnknown : m_fioVersionLabel->text()) << "\n";
-        out << kReportTargetPartition << m_activeConfig.targetRoot << "\n";
+        out << kReportTargetPartition << m_activeConfig.targetDir << "\n";
         out << kReportTestFolder << QDir::toNativeSeparators(m_activeConfig.testFolder()) << "\n";
         // 这一行写**界面当前的配置**，不写 m_activeConfig：
         // 自检在"还没开跑就中止"那条路径上（比如没选目标分区）也会出报告，
@@ -3802,10 +4048,16 @@ void MainWindow::writeSelfTestReport()
                 << kReportNotRealtime;
         if (!m_lastError.isEmpty())
             out << kReportStartupError << m_lastError << "\n";
-        if (!m_volumeSummary.isEmpty()) {
-            out << kReportVolumeList << m_volumeSummary.size() << kReportSuffixCount;
-            for (const QString &line : m_volumeSummary)
+        if (!m_diskSummary.isEmpty()) {
+            // 这里列的是"磁盘 + 它下面每个文件系统"两组行，
+            // 报个数只会让人以为那是磁盘数，所以只说清了列的是什么。
+            out << kReportVolumeList << kReportDiskListNote;
+            for (const QString &line : m_diskSummary)
                 out << "    " << line << "\n";
+        }
+        if (!m_ignoredVolumes.isEmpty()) {
+            // 被规则挡掉的卷也要写出来：否则用户只会看到"我的盘不见了"
+            out << kReportIgnoredList << m_ignoredVolumes.join(QStringLiteral("  ")) << "\n";
         }
         out << kReportPhaseList;
         QStringList kinds;
@@ -3935,13 +4187,13 @@ void MainWindow::writeSelfTestReport()
                 << "\n";
         }
 
-        // ---- fio 查找：只看 exe 目录，找不到就走 PATH，绝不扫盘 ----
+        // ---- fio 查找：只看程序目录，找不到就走 PATH，绝不扫盘 ----
         {
             const QString appDir = QCoreApplication::applicationDirPath();
             const QString bundled = bundledFioPathFor(appDir);
-            // 自带的那份必须正好指向 <exe目录>\fio\fio.exe
-            const QString expected =
-                QDir::cleanPath(QDir(appDir).absoluteFilePath(QStringLiteral("fio/fio.exe")));
+            // 自带的那份必须正好指向 <程序目录>/fio/<fio 可执行文件名>
+            const QString expected = QDir::cleanPath(
+                QDir(appDir).absoluteFilePath(QStringLiteral("fio/") + fioExecutableName()));
             const bool bundledOk = bundled.isEmpty() || bundled == expected;
 
             // 目录往上几层放的 fio **不许**被找到：喂一个临时的空目录进去，
@@ -3950,10 +4202,11 @@ void MainWindow::writeSelfTestReport()
             const QString fromTemp = bundledFioPathFor(tempDir.path());
             const bool noScanOk = fromTemp.isEmpty();
 
-            // 标签判定：只有 exe 目录里那份才算"自带"
-            const bool labelOk = fioLooksBundled(expected)
-                                 && !fioLooksBundled(
-                                     QDir::cleanPath(appDir + QStringLiteral("/../fio/fio.exe")));
+            // 标签判定：只有程序目录里那份才算"自带"
+            const bool labelOk =
+                fioLooksBundled(expected)
+                && !fioLooksBundled(QDir::cleanPath(
+                       appDir + QStringLiteral("/../fio/") + fioExecutableName()));
 
             out << kReportGuardFioLookup << ((bundledOk && noScanOk && labelOk) ? "PASS" : "FAIL")
                 << kReportFioLookupDetail

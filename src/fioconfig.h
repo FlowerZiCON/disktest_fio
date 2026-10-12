@@ -77,7 +77,14 @@ public:
     static QVector<qint64> perfSizeChoices();
     static QString perfSizeText(qint64 bytes);
 
-    QString targetRoot;                              ///< 形如 "G:/"
+    /// 目标**目录** —— 测试文件会建在 <targetDir>/ml_disktest 里。
+    ///
+    /// 为什么是目录而不是"分区/盘符根"：容量和"写满"针对的始终是这个目录
+    /// **所在的文件系统**，而不是该目录本身。所以同一个文件系统里任意一个
+    /// 可写目录都等价 —— 系统盘的 "/" 常常只有 root 能写，但
+    /// /home/<用户> 就在同一个文件系统上，选它就等于测系统盘，而且不需要提权。
+    /// 见 docs/readme.md 的「目标为什么是一个目录」。
+    QString targetDir;
     TestMode testMode   = TestMode::Reliability;
 
     // ---- 可靠性测试 ----
@@ -100,8 +107,23 @@ public:
     static QString fileBaseName() { return QStringLiteral("testfile"); }
     /// 单个测试文件的大小上限：2 GiB（FAT32 单文件 4 GiB 上限的一半）。
     static qint64  maxFileSize() { return qint64(2) * 1024 * 1024 * 1024; }
-    /// 固定的 IO 引擎。Windows 上只有 windowsaio 支持直接 I/O。
-    static QString ioEngine() { return QStringLiteral("windowsaio"); }
+    /// 当前使用的 IO 引擎。
+    ///
+    /// Windows 上只有 windowsaio 支持直接 I/O（见 README §5.8）；
+    /// Linux 上 direct=1 就是 O_DIRECT，libaio / io_uring / psync 都支持，
+    /// 默认选 libaio —— 只有异步引擎才能让 iodepth 真正生效，
+    /// 性能项的 Q8T1 / Q32T1 靠它才测得准。
+    ///
+    /// 这个值是**全局**的，由 MainWindow 在解析出 fio 路径之后
+    /// 用 `fio --enghelp` 探一次再 setIoEngine() 定下来：
+    /// 发行版的 fio 未必编了 libaio，探不到就自动退回 psync。
+    static QString ioEngine();
+    /// 平台默认引擎（还没探测过 fio 时用它）。
+    static QString defaultIoEngine();
+    /// 按优先级排列的候选引擎，探测时取第一个可用的。
+    static QStringList candidateIoEngines();
+    /// 用探测结果覆盖引擎；传空串恢复成平台默认。
+    static void    setIoEngine(const QString &engine);
     static bool    directIo() { return true; }
 
     bool    isSequential() const;

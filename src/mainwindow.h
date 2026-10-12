@@ -35,8 +35,8 @@ class QFile;
 class QRadioButton;
 class QSpinBox;
 class QStackedWidget;
-class QTableWidget;
-class QTableWidgetItem;
+class QTreeWidget;
+class QTreeWidgetItem;
 class QWidget;
 QT_END_NAMESPACE
 
@@ -163,8 +163,17 @@ private:
     FioConfig configFromUi() const;
     void      applyConfigToUi(const FioConfig &cfg);
 
-    QString selectedRoot() const;
-    /// 重新枚举并填充分区列表。
+    /// 当前目标**目录**（测试文件建在它下面的 ml_disktest 里）。
+    /// 选中列表里的一行会把它设成那一行的「可测目录」；
+    /// 用「浏览目录…」可以直接指定任意可写目录（不限于列表里的）。
+    QString targetDir() const { return m_targetDir; }
+    /// 把目标目录换成 <dir>，并尝试在列表里选中对应的文件系统那一行。
+    void setTargetDir(const QString &dir);
+    /// 当前选中的那一行对应的可测目录（没选中 / 那一行不可测时返回空）。
+    QString selectedTargetDir() const;
+    /// 「浏览目录…」：用户直接指定一个目录。
+    void onBrowseTargetDir();
+    /// 重新枚举并填充磁盘 / 分区列表。
     /// startup = true 时**不预选任何盘**（启动时用）：第一行常常是系统盘，
     /// 默认选中它等于"打开程序就能顺手点开始测"，选盘必须由用户主动做一次。
     bool    refreshDriveList(bool startup = false);
@@ -240,13 +249,21 @@ private:
 
     QString locateFioExecutable() const;
 
+    /// 用 `fio --enghelp` 探一次可用 IO 引擎，挑一个真正存在的定下来
+    /// （见 FioConfig::candidateIoEngines），并把「IO 方式」那行刷新。
+    /// 探测不出来就退回平台默认值，绝不因为探测失败而让界面停在错误状态。
+    void applyDetectedIoEngine(const QString &fioPath);
+
     void writeSelfTestReport();
     /// 自检断言：绘图方式与密度两组单选都必须"恰好选中一个"。
     bool verifyExclusiveGroups();
 
     // ---- 参数控件 ----
     QLineEdit    *m_fioPathEdit     = nullptr;
-    QTableWidget *m_driveTable      = nullptr;
+    /// 磁盘 / 分区列表。**两层**：磁盘是顶层项（不可选），它下面的文件系统才是可选目标。
+    QTreeWidget  *m_driveTree       = nullptr;
+    /// 当前目标目录（测试文件建在 <m_targetDir>/ml_disktest 里，见 targetDir()）。
+    QString       m_targetDir;
     QLabel       *m_targetLabel     = nullptr;
     QRadioButton *m_modeReliabilityRadio = nullptr;
     QRadioButton *m_modePerfRadio   = nullptr;
@@ -285,6 +302,7 @@ private:
     QLabel       *m_avgWriteLabel   = nullptr;
     QLabel       *m_avgReadLabel    = nullptr;
     QLabel       *m_fioVersionLabel = nullptr;
+    QLabel       *m_ioModeLabel     = nullptr;   ///< 「IO 方式」那行静态说明（引擎探测完要刷新）
     QLabel       *m_privilegeLabel  = nullptr;   ///< 状态栏右下角：提权模式 / 普通模式
     /// 校验失败的大字红色告警：平时隐藏，fio 一报出不一致就显示。
     /// 它和普通告警不同——普通告警只在日志里写一行红字，很容易被忽略；
@@ -364,15 +382,15 @@ private:
         QVector<QPointF> writeTrace[4];
     };
     QHash<QString, PerfResult> m_perfResults;
-    QString m_perfResultsRoot;   ///< 当前界面和内存里放的是哪个盘的结果
-    /// 先把当前结果存回自己那个盘，再把 root 那个盘的结果显示出来。
+    QString m_perfResultsTarget;   ///< 当前界面和内存里放的是哪个目标的结果
+    /// 先把当前结果存回自己那个目标，再把 target 的结果显示出来。
     void switchPerfResultsTo(const QString &root);
 
     // ---- 图表里现在显示的是"谁的"数据 ----
     // 关键：**性能测试和可靠性测试各自独立**。同一块盘只测过性能时，
     // 切到可靠性模式就该显示"请先开始测试"，而不是把性能的曲线留在那里。
     // 从文件加载的历史数据走独立窗口，不参与这里的判断。
-    QString m_chartOwnerRoot;    ///< 图表数据属于哪个盘
+    QString m_chartOwnerTarget;  ///< 图表数据属于哪个目标
     FioConfig::TestMode m_chartOwnerMode = FioConfig::TestMode::Reliability;
     /// 按"当前模式 + 当前盘"决定显示图表还是"请先开始测试"。
     void updateChartPlaceholder();
@@ -413,7 +431,10 @@ private:
     QStringList     m_logLines;
     QStringList     m_observedStates;
     QString         m_lastError;
-    QStringList     m_volumeSummary;   ///< 最近一次枚举到的卷，写进自检报告便于排查   ///< 最后一次报错，写进自检报告免得失败原因不可见
+    QStringList     m_diskSummary;   ///< 最近一次枚举到的磁盘/分区，写进自检报告便于排查
+    /// 被规则排除掉的卷（网络驱动器 / 内存盘 / 没有物理磁盘的映射盘）。
+    /// 也写进自检报告 —— 免得用户只看到"我的盘怎么不见了"却查不出原因。
+    QStringList     m_ignoredVolumes;
 
     double   m_phaseOffsetSec = 0.0;   ///< 保留字段：横轴改用容量后不再需要时间偏移
     double   m_elapsedSeconds = 0.0;
