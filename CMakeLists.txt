@@ -140,8 +140,14 @@ if(TARGET Qt6::windeployqt)
             "${CMAKE_SOURCE_DIR}/licenses/Qt-LGPLv3.txt"
             "${CMAKE_SOURCE_DIR}/licenses/fio-GPLv2.txt"
             "${DIST_DIR}/licenses/"
+    # 随包带一份面向用户的 README。它引用了截图，所以截图目录也要跟上——
+    # 少了截图的 README 在发布包里就是一堆断链。
+    # 必须用 copy_directory：cmake -E copy 对目录是**静默失败**的
+    # （目标目录根本不建，也不报错），写错了只会让包里悄悄少东西。
     COMMAND "${CMAKE_COMMAND}" -E copy
             "${CMAKE_SOURCE_DIR}/README.md" "${DIST_DIR}/README.md"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/docs/images" "${DIST_DIR}/docs/images"
         DEPENDS qtfiogui
         COMMENT "打包到 ${DIST_DIR}（exe + Qt 运行库 + MSVC 运行库 + 平台插件 + fio）"
         VERBATIM)

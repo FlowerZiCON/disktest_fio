@@ -8,7 +8,8 @@ rem
 rem  NOTE: This file must stay CRLF. cmd.exe's .bat parser does not accept LF.
 rem  NOTE: Messages are deliberately ASCII-only. Non-ASCII text in a .bat is
 rem        decoded with whatever code page the console happens to use, and
-rem        comes out as garbage when redirected. Chinese docs live in README.md.
+rem        comes out as garbage when redirected. Chinese docs live in README.md
+rem        (user-facing) and docs\readme.md (technical).
 rem ============================================================================
 for /f "tokens=2 delims=:." %%c in ('chcp') do set "OLDCP=%%c"
 setlocal enabledelayedexpansion
@@ -457,6 +458,9 @@ if not exist "!DIST_DIR!\licenses\Qt-LGPLv3.txt"          set "DIST_BAD=1"
 if not exist "!DIST_DIR!\licenses\fio-GPLv2.txt"          set "DIST_BAD=1"
 if not exist "!DIST_DIR!\fio\fio.exe"                     set "DIST_BAD=1"
 if not exist "!DIST_DIR!\fio\COPYING.txt"                 set "DIST_BAD=1"
+rem The README embeds screenshots, so they must ship too or its links break
+if not exist "!DIST_DIR!\README.md"                       set "DIST_BAD=1"
+if not exist "!DIST_DIR!\docs\images\startup.png"         set "DIST_BAD=1"
 if defined DIST_BAD (
     echo [verify] dist is missing required license/runtime files:
     if not exist "!DIST_DIR!\licenses\LICENSE"                echo          licenses\LICENSE
@@ -465,9 +469,11 @@ if defined DIST_BAD (
     if not exist "!DIST_DIR!\licenses\fio-GPLv2.txt"          echo          licenses\fio-GPLv2.txt
     if not exist "!DIST_DIR!\fio\fio.exe"                     echo          fio\fio.exe
     if not exist "!DIST_DIR!\fio\COPYING.txt"                 echo          fio\COPYING.txt
+    if not exist "!DIST_DIR!\README.md"                       echo          README.md
+    if not exist "!DIST_DIR!\docs\images\startup.png"         echo          docs\images\ ^(README screenshots^)
     exit /b 1
 )
-echo [verify] dist is complete ^(exe + Qt + fio + licenses^)
+echo [verify] dist is complete ^(exe + Qt + fio + licenses + README^)
 exit /b 0
 
 :restore_cp
