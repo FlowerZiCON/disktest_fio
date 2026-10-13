@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(qtfiogui
-    VERSION 3.0.0
+    VERSION 3.0.1
     DESCRIPTION "Qt + fio disk reliability tester GUI (file mode only)"
     LANGUAGES CXX)
 

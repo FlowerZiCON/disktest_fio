@@ -319,6 +319,9 @@ QString FioConfig::writeJobFileText(const FilePlan &plan) const
     // 而我们自己预分配文件又很慢（G: 上实测 2 GB 要 8.9 秒，占整个测试时间的四成），
     // create_on_open 让"直接写一遍"成为可能，既省掉布局也省掉预分配。
     lines << QStringLiteral("create_on_open=1");
+    // 一次只开一个文件：fio 默认把 nrfiles 个文件全打开、并行发 IO，
+    // 写入时盘上同时有好几段在写、位置来回跳，速度波动很明显（见 openFiles()）。
+    lines << QStringLiteral("openfiles=%1").arg(openFiles());
     lines << QStringLiteral("nrfiles=%1").arg(plan.fileCount);
     lines << QStringLiteral("filesize=%1").arg(plan.fileSize);
     lines << QStringLiteral("filename_format=%1_$filenum").arg(fileBaseName());
@@ -339,6 +342,9 @@ QString FioConfig::readJobFileText(int fileCount, qint64 totalBytes) const
     lines << QStringLiteral("bs=%1").arg(blockSize());
     lines << QStringLiteral("iodepth=%1").arg(iodepth);
     lines << QStringLiteral("rw=%1").arg(readRw());
+    // 读阶段同样一次只开一个文件：并行读多个文件会让读回速度也抖起来，
+    // 而这一段正是出校验结论的地方，曲线要能看清"哪一段掉速了"。
+    lines << QStringLiteral("openfiles=%1").arg(openFiles());
     // 读阶段不给 filesize：文件已经在那儿了，fio 按实际大小读。
     lines << QStringLiteral("nrfiles=%1").arg(fileCount);
     lines << QStringLiteral("filename_format=%1_$filenum").arg(fileBaseName());
