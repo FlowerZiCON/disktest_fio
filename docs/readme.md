@@ -871,6 +871,124 @@ sudo chown "$USER" /mnt/testdisk            # 让普通用户能写，程序不�
 sudo umount /mnt/testdisk && sudo losetup -d /dev/loop6 && rm /tmp/disk.img
 ```
 
+### 交叉编译到 ARM64（在 x86_64 机器上编 aarch64 的程序）
+
+**可行，已实测。** 难点不在 C++ 工具链（`g++-aarch64-linux-gnu` 装一下就有），
+而在 **Qt6 没有现成的 ARM 版本** —— `find_package(Qt6)` 必须找到一份
+**aarch64 的 Qt6**，同时 moc/rcc/uic 要用**宿主机的**。
+
+思路：用 `debootstrap` 造一个 arm64 根文件系统当 sysroot（**不动宿主机的 dpkg/apt**），
+在里装 arm64 的 Qt6；宿主机的 Qt6 只借它的工具。
+
+```bash
+# 1) arm64 sysroot（约 1.5 GB）
+sudo debootstrap --arch=arm64 --variant=minbase jammy /opt/arm64-root \
+     http://ports.ubuntu.com/ubuntu-ports
+sudo cp /usr/bin/qemu-aarch64-static /opt/arm64-root/usr/bin/   # binfmt 已注册则无需 chroot 手动跑
+
+# 2) 源里补 universe（debootstrap 默认只有 main，qt6-base-dev 在 universe）
+sudo tee /opt/arm64-root/etc/apt/sources.list <<'EOF'
+deb http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe multiverse
+deb http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe multiverse
+deb http://ports.ubuntu.com/ubuntu-ports jammy-security main restricted universe multiverse
+EOF
+
+# 3) 装 arm64 的 Qt6 + 工具链
+#    注意包名是 libqt6charts6-dev，不是 qt6-charts-dev
+sudo chroot /opt/arm64-root apt-get update
+sudo chroot /opt/arm64-root apt-get install -y \
+     qt6-base-dev libqt6charts6-dev cmake ninja-build g++ fio \
+     libgl-dev libegl-dev libgles-dev libxkbcommon-dev \
+     libfontconfig1-dev libfreetype6-dev
+```
+
+**两个必须踩过的坑：**
+
+1. **`QT_HOST_PATH` 要的是标准 Qt 布局，而 Ubuntu 是多架构布局。**
+   宿主的配置在 `/usr/lib/x86_64-linux-gnu/cmake`，工具在 `/usr/lib/qt6/libexec`，
+   Qt 却去 `<QT_HOST_PATH>/lib/cmake` 和 `<QT_HOST_PATH>/libexec` 找。搭个符号链接农场：
+
+   ```bash
+   sudo mkdir -p /opt/qt6-host/lib
+   sudo ln -sfn /usr/lib/x86_64-linux-gnu/cmake   /opt/qt6-host/lib/cmake
+   sudo ln -sfn /usr/lib/qt6/libexec              /opt/qt6-host/libexec
+   sudo ln -sfn /usr/lib/qt6/bin                  /opt/qt6-host/bin
+   sudo ln -sfn /usr/include/x86_64-linux-gnu/qt6 /opt/qt6-host/include
+   ```
+   **另外**：主机侧的 Qt6 目标文件里写死了 `<bindir>/qmake`，而 Ubuntu 的 amd64 包
+   没把 qmake 放进 `/usr/lib/qt6/bin`（arm64 包反而有）—— 少了它 CMake 直接报
+   `The imported target "Qt6::qmake" references the file ... but this file does not exist`：
+
+   ```bash
+   sudo ln -sfn /usr/lib/qt6/bin/qmake6 /usr/lib/qt6/bin/qmake
+   ```
+
+2. **sysroot 里要有 OpenGL 的开发头文件。** `qt6-base-dev` 不拉 `libgl-dev`，
+   于是 `FindOpenGL` 找不到 `OPENGL_INCLUDE_DIR` → `Qt6Gui` 配置失败 →
+   Widgets / Charts 全跟着失败，而报错只会含糊地说
+   "Failed to find Qt component Widgets"。装上面第 3 步里那几个 `lib*-dev` 即可。
+
+然后是工具链文件与构建：
+
+```cmake
+# /opt/arm64-toolchain.cmake
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+set(CMAKE_SYSROOT /opt/arm64-root)
+set(CMAKE_C_COMPILER   aarch64-linux-gnu-gcc)
+set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
+set(CMAKE_FIND_ROOT_PATH /opt/arm64-root)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)   # moc/rcc/uic 用宿主的
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+set(QT_HOST_PATH /opt/qt6-host CACHE PATH "" FORCE)
+set(QT_HOST_PATH_CMAKE_DIR /opt/qt6-host/lib/cmake CACHE PATH "" FORCE)
+```
+
+```bash
+cmake -S . -B build-arm64 -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=/opt/arm64-toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-arm64 -j8     # 编译器在宿主机原生跑，不经过模拟器，很快
+file build-arm64/disktest
+# → ELF 64-bit LSB pie executable, ARM aarch64, interpreter /lib/ld-linux-aarch64.so.1
+```
+
+项目这边**一行都不用改**（`CMakeLists.txt` 里已有的 `if(WIN32)` 分支就够）。
+
+**目标设备上要装什么**（二进制直接依赖 `libQt6Charts/Widgets/Gui/Core`）：
+
+```bash
+sudo apt install libqt6widgets6 libqt6charts6 qt6-qpa-plugins fio
+```
+
+Qt 版本要和交叉编译时用的一致（这里是 **6.2.4**，即 jammy 自带的版本）。
+
+#### 用 qemu 验证到哪一步为止
+
+`qemu-user-static`（Ubuntu 22.04 是 6.2）+ `binfmt_misc` 可以直接跑这份 ARM 产物，
+**但跑不完整个流程**：
+
+| 在 qemu 里 | 结果 |
+| --- | --- |
+| `--version` | ✅ `disktest 3.0.3` |
+| `--selftest-parse`（94 项纯逻辑断言） | ✅ 全 PASS |
+| 完整 `--selftest`（要拉起 fio） | ❌ 卡住，**永远不结束** |
+| 对照：ARM 的 `sh` / `python3` fork+exec 子进程 | ✅ 正常 |
+
+一跑 `-strace` 就清楚了：整个过程**只出现过一个线程 TID**，5 次 `clone()` 全部
+`EINVAL`，`execve` **一次都没有** —— 也就是说这个 Qt 程序在 qemu 下**创建不出任何
+线程/子进程**，`QProcess` 自然拉不起 fio（连启动时枚举磁盘用的 `lsblk` 都没拉起来，
+程序静默退回了内置枚举），于是主线程在事件循环里一直等。
+`sh` 和 `python3` 能 fork，说明不是"qemu 不能 fork"，
+而是这个二进制走的 clone 路径（glibc 2.35 的 `clone3`/`CLONE_PIDFD` 回退）在 qemu 6.2 上不被支持。
+
+**结论：交叉编译本身是通的、产物是对的，但完整功能必须在真机 ARM 上验证**，
+qemu-user 6.2 不足以替代。想换更宽松的模拟环境可以试试 qemu 7 以上。
+
+（另外单独测到：ARM 版 fio 在 qemu 下 `--ioengine=io_uring` **静默不干活**
+（有退出码 0、但一行 I/O 都没做），`psync` 正常。这同样只在模拟环境里成立。）
+
 ---
 
 ## 5. 踩过的坑（都实测过）
@@ -1324,6 +1442,31 @@ disktest/
 
 > 顺带一提：**不预选盘**是特意做的。上一版在启动时会静默选中列表第一行，
 > 而第一行常常是系统盘。现在启动时一行都不选，状态栏提示"请先在「选择磁盘」列表里选中要测试的分区"。
+
+### 参数控件不吃滚轮（`WheelGuard`）
+
+**下拉框和数字框一律不响应滚轮。** 参数面板就紧贴在「选择磁盘」列表下面，
+翻列表时鼠标很容易扫过它们 —— 而 `QComboBox` 默认滚一下就换一项，
+结果是读写模式被悄悄从「顺序读写」改成「随机读写」之类，多半还没察觉，
+等测试跑完才发现参数不对。
+
+拦的时候**必须把事件转发给外层滚动区**（`WheelGuard` 里那段
+`sendEvent(area->viewport(), event)`）。直接把事件吃掉的话，鼠标滚到参数控件上
+面板就"卡住"不动了 —— 那比误改还难受：用户想翻列表，手一抖停在输入框上就滚不动了。
+
+还有一处**光靠事件过滤器拦不住**：Qt 是在**窗口层**按 `focusPolicy` 决定
+"滚轮是否给焦点"的，比任何控件级事件过滤都早。而 `QComboBox` /
+`QAbstractSpinBox` 的默认策略正是 `Qt::WheelFocus`，所以构造函数里还要把它们统一改成
+`Qt::StrongFocus` —— 否则值虽然不会被改，但鼠标扫过去焦点仍会跳到那个框上
+（蓝框一闪），之后敲键盘就打到它里面去了。
+
+实测（Win32 注入真实滚轮事件，`SetThreadDpiAwarenessContext` 对齐坐标后按客户区坐标打）：
+
+| | `读写模式` 下拉框 | 面板 |
+| --- | --- | --- |
+| 去掉防护 | 顺序读写 → **随机读写** | 不滚（事件被控件吃掉） |
+| 有防护 | 保持 **顺序读写** | **照常滚动** |
+
 
 ### fio 与 Qt 运行库从哪来
 

@@ -18,6 +18,8 @@
 #include "speedchart.h"
 #include "uitext.h"
 
+#include <QAbstractScrollArea>
+#include <QAbstractSpinBox>
 #include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
@@ -203,6 +205,52 @@ namespace {
 /// 这个 fio 是不是"自带的"（exe 目录里带的，或源码树里的 third_party\fio）。
 /// 定义在本文件后面的 locateFioExecutable 旁边，这里先声明，供构造函数用。
 bool fioLooksBundled(const QString &path);
+
+// ── 让输入框 / 下拉框不再被滚轮误改 ──
+//
+// `QComboBox` 和 `QAbstractSpinBox`（`QSpinBox` 等）**默认响应滚轮**：
+// 鼠标停在上面滚一下值就变了。而这个界面里参数控件就紧贴在"选择磁盘"列表下面，
+// 用户上下翻列表时鼠标很容易扫过它们 —— 结果是队列深度、测试圈数、读写模式
+// 被悄悄改掉，而且多半根本没察觉，等测试跑起来才发现参数不对。
+//
+// 所以统一装一个事件过滤器：这些控件的滚轮事件一律不处理，并且**转发给最近的外层
+// 滚动区**。转发这一步不能省 —— 直接把事件吃掉的话，鼠标滚到参数控件上时面板就
+// "卡住"不动了，那比误改还难受：用户想翻列表，手一抖停在输入框上就滚不动了。
+//
+// 判据用**控件类型**而不是逐个列举对象，这样以后新加的下拉框/数字框自动生效。
+class WheelGuard : public QObject
+{
+public:
+    explicit WheelGuard(QObject *parent) : QObject(parent) {}
+
+    /// 只有这几类会"滚一下就改值"。QLineEdit 之类本来就不理会滚轮，
+    /// QTreeWidget 是滚动区本身、必须保留滚轮。
+    static bool changesValueOnWheel(const QObject *object)
+    {
+        return qobject_cast<const QComboBox *>(object) != nullptr
+               || qobject_cast<const QAbstractSpinBox *>(object) != nullptr;
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() != QEvent::Wheel)
+            return QObject::eventFilter(watched, event);
+
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (!widget || !widget->isEnabled() || !changesValueOnWheel(widget))
+            return QObject::eventFilter(watched, event);
+
+        // 交给最近的外层滚动区去滚
+        for (QWidget *parent = widget->parentWidget(); parent; parent = parent->parentWidget()) {
+            if (auto *area = qobject_cast<QAbstractScrollArea *>(parent)) {
+                QCoreApplication::sendEvent(area->viewport(), event);
+                break;
+            }
+        }
+        return true;   // 到此为止，控件自己的滚轮处理不会再跑到
+    }
+};
 } // namespace
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -275,6 +323,24 @@ void MainWindow::buildUi()
     rootLayout->addWidget(scroll);
     rootLayout->addWidget(buildChartPanel(), 1);
     setCentralWidget(central);
+
+    // 参数控件一律不吃滚轮（见 WheelGuard）：翻列表时鼠标扫过它们不该改值。
+    // 装在 qApp 上而不是各个控件上 —— 未来的下拉框/数字框也自动受保护。
+    //
+    // 焦点策略也得一起改：Qt 是在**窗口层**按 focusPolicy 决定"滚轮是否给焦点"的，
+    // 那一步发生得比任何控件级事件过滤都早，过滤不到。而 QComboBox /
+    // QAbstractSpinBox 的默认策略正是 Qt::WheelFocus —— 不改成 StrongFocus 的话，
+    // 值虽然不会被改，但鼠标扫过去焦点还是会跳到那个框上（蓝框一闪），
+    // 之后敲键盘就打到它里面去了，一样是误操作。
+    const QList<QComboBox *> combos = findChildren<QComboBox *>();
+    for (QComboBox *combo : combos)
+        combo->setFocusPolicy(Qt::StrongFocus);
+    const QList<QAbstractSpinBox *> spins = findChildren<QAbstractSpinBox *>();
+    for (QAbstractSpinBox *spin : spins)
+        spin->setFocusPolicy(Qt::StrongFocus);
+
+    qApp->installEventFilter(new WheelGuard(this));
+
     updateWindowTitle();   // 模式下拉框这时才建好，标题要再设一次
 
     // 状态栏右侧：先是权限模式，再是 fio 引擎版本
