@@ -502,7 +502,10 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
         "QTreeWidget::item:selected { background: #cce8ff; color: #10314f; }"
         "QTreeWidget::item:selected:active { background: #b6dcff; color: #10314f; }"));
     m_driveTree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
-    m_driveTree->header()->resizeSection(0, 148);
+    // 185：去掉 "PhysicalDriveN" 前缀之后，第一列装的就是型号本身，
+    // 实测常见型号（"Predator SSD GM7000 1TB" / "UMIS RPJYJ1T24MLR1HWY"）
+    // 连树形缩进大约要 170~185 px 才不被省略号截掉。仍然是 Interactive，用户可以拖。
+    m_driveTree->header()->resizeSection(0, 185);
     m_driveTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_driveTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_driveTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
@@ -1011,7 +1014,9 @@ bool MainWindow::refreshDriveList(bool startup)
     for (const DiskEntry &disk : disks) {
         // ---- 第一层：物理磁盘，只当分组标题 ----
         auto *diskItem = new QTreeWidgetItem(m_driveTree);
-        diskItem->setText(0, disk.nameLine());
+        // 第一列只放型号：设备名（PhysicalDrive0 / sda）对用户没意义，
+        // 却会把本来就不宽的第一列占掉一大半，把型号挤成省略号。
+        diskItem->setText(0, disk.modelLine());
         // 标记单独占一列：第一列宽度紧，写在里面会被省略号吃掉，
         // 而"[系统盘]"恰恰是防止顺手把系统盘写掉的那一眼。
         QStringList diskTags;
@@ -1026,7 +1031,10 @@ bool MainWindow::refreshDriveList(bool startup)
         diskFont.setBold(true);
         diskItem->setFont(0, diskFont);
 
+        // 设备名挪到悬停提示里 —— 要和磁盘管理 / lsblk 对照时看这里
         QStringList diskTips;
+        if (!disk.kernelName.isEmpty())
+            diskTips << kVolumeDeviceFmt.arg(disk.kernelName);
         if (!disk.model.isEmpty())
             diskTips << disk.model;
         if (disk.isSystemDisk)
@@ -3956,17 +3964,16 @@ void MainWindow::writeSelfTestReport()
     const QIcon windowIcon = QApplication::windowIcon();
     const bool iconGuard = !windowIcon.isNull() && !windowIcon.availableSizes().isEmpty();
 
-    // 折线抽稀步长的分档必须精确（<128GiB → 3，128GiB~1TiB → 5，≥1TiB → 10）
+    // 折线抽稀步长的分档必须精确（<256GiB → 5，256GiB~1TiB → 15，≥1TiB → 30）
     constexpr qint64 kGiB = 1024LL * 1024 * 1024;
     constexpr qint64 kTiB = 1024LL * kGiB;
     const struct { qint64 bytes; int want; QString note; } stepProbes[] = {
-        {100LL * kGiB,        3,  QStringLiteral("100 GiB")},
-        {127LL * kGiB,        3,  QStringLiteral("127 GiB")},
-        {128LL * kGiB,        5,  kReportStepProbe128GiB},
-        {256LL * kGiB,        5,  QStringLiteral("256 GiB")},
-        {1023LL * kGiB,       5,  QStringLiteral("1023 GiB")},
-        {1LL * kTiB,          10, kReportStepProbe1TiB},
-        {4LL * kTiB,          10, QStringLiteral("4 TiB")},
+        {100LL * kGiB,        5,  QStringLiteral("100 GiB")},
+        {255LL * kGiB,        5,  QStringLiteral("255 GiB（下边界前一档）")},
+        {256LL * kGiB,        15, kReportStepProbe256GiB},
+        {1023LL * kGiB,       15, QStringLiteral("1023 GiB")},
+        {1LL * kTiB,          30, kReportStepProbe1TiB},
+        {4LL * kTiB,          30, QStringLiteral("4 TiB")},
     };
     bool stepGuard = true;
     QStringList stepLines;

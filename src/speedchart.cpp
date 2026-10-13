@@ -329,13 +329,17 @@ int SpeedChart::autoStepForBytes(qint64 totalBytes)
 {
     // 按实际要写入/读取的数据量决定折线抽稀步长。
     // 盘越大点数越多，抽得越狠；散点图和 CSV 始终是全量。
+    //
+    //   不到 256 GiB        每 5 个点画 1 个
+    //   256 GiB ~ 1 TiB     每 15 个点画 1 个
+    //   1 TiB 及以上        每 30 个点画 1 个
     constexpr qint64 kGiB = 1024LL * 1024 * 1024;
     constexpr qint64 kTiB = 1024LL * kGiB;
     if (totalBytes >= kTiB)
-        return 10;
-    if (totalBytes >= 128 * kGiB)
-        return 5;
-    return 3;
+        return 30;
+    if (totalBytes >= 256 * kGiB)
+        return 15;
+    return 5;
 }
 void SpeedChart::setTimeAxis(double seconds)
 {

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(qtfiogui
-    VERSION 3.0.1
+project(disktest
+    VERSION 3.0.2
     DESCRIPTION "Qt + fio disk reliability tester GUI (file mode only)"
     LANGUAGES CXX)
 
@@ -28,7 +28,7 @@ set(CMAKE_AUTORCC ON)
 # 找不到 Qt。代码没有用到 6.2 之后才有的 API，Windows 上的 6.8 照样满足。
 find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Charts)
 
-add_executable(qtfiogui WIN32
+add_executable(disktest WIN32
     src/main.cpp
     src/uitext.h
     src/fioconfig.h
@@ -58,20 +58,20 @@ add_executable(qtfiogui WIN32
 # .rc 只有 Windows 工具链认识，CMake 也只在 Windows 上启用 RC 语言；
 # 在 Linux 上把它塞进 add_executable 会让 g++ 去编这个文件，直接报错。
 if(WIN32)
-    target_sources(qtfiogui PRIVATE resources/app.rc)
+    target_sources(disktest PRIVATE resources/app.rc)
 endif()
 
-target_link_libraries(qtfiogui PRIVATE Qt6::Widgets Qt6::Charts)
+target_link_libraries(disktest PRIVATE Qt6::Widgets Qt6::Charts)
 
 # 版本号只有 project(... VERSION x.y.z) 这一个来源，编译期传给代码，
 # 标题栏和「关于」里显示的都取自它。
-target_compile_definitions(qtfiogui PRIVATE QTFIOGUI_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(disktest PRIVATE DISKTEST_VERSION="${PROJECT_VERSION}")
 
 if(MSVC)
     # /utf-8 必须加：源码里有中文字面量，否则 MSVC 按 GBK 解释会变乱码
-    target_compile_options(qtfiogui PRIVATE /utf-8 /W4)
+    target_compile_options(disktest PRIVATE /utf-8 /W4)
 else()
-    target_compile_options(qtfiogui PRIVATE -Wall -Wextra)
+    target_compile_options(disktest PRIVATE -Wall -Wextra)
 endif()
 
 # 图标可以随时重新生成（需要 Pillow）。resources/logo-source.ico 是母版，
@@ -156,9 +156,9 @@ if(TARGET Qt6::windeployqt)
     add_custom_target(package
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DIST_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}"
-        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:qtfiogui>" "${DIST_DIR}/"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:disktest>" "${DIST_DIR}/"
         COMMAND Qt6::windeployqt --release --no-translations --no-opengl-sw
-                --no-system-d3d-compiler "${DIST_DIR}/qtfiogui.exe"
+                --no-system-d3d-compiler "${DIST_DIR}/disktest.exe"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${MSVC_CRT_DLLS} "${DIST_DIR}/"
         ${PACKAGE_FIO_COMMANDS}
     # 许可证文本集中放在 dist/licenses/：
@@ -181,14 +181,14 @@ if(TARGET Qt6::windeployqt)
             "${CMAKE_SOURCE_DIR}/README.md" "${DIST_DIR}/README.md"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/docs/images" "${DIST_DIR}/docs/images"
-        DEPENDS qtfiogui
+        DEPENDS disktest
         COMMENT "打包到 ${DIST_DIR}（exe + Qt 运行库 + MSVC 运行库 + 平台插件 + fio）"
         VERBATIM)
 
     add_custom_target(deploy
         COMMAND Qt6::windeployqt --release --no-translations --no-opengl-sw
-                --no-system-d3d-compiler "$<TARGET_FILE:qtfiogui>"
-        DEPENDS qtfiogui
+                --no-system-d3d-compiler "$<TARGET_FILE:disktest>"
+        DEPENDS disktest
         COMMENT "windeployqt: 把 Qt 运行时拷到 exe 旁边")
 else()
     # Linux（没有 windeployqt）：Qt 运行时是发行版提供的，不入包。
@@ -198,7 +198,7 @@ else()
     add_custom_target(package
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DIST_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}"
-        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:qtfiogui>" "${DIST_DIR}/"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:disktest>" "${DIST_DIR}/"
         ${PACKAGE_FIO_COMMANDS}
     # 许可证文本集中放在 dist/licenses/：
     #   LICENSE                 程序自身（GPL-3.0）
@@ -216,7 +216,7 @@ else()
             "${CMAKE_SOURCE_DIR}/README.md" "${DIST_DIR}/README.md"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/docs/images" "${DIST_DIR}/docs/images"
-        DEPENDS qtfiogui
+        DEPENDS disktest
         COMMENT "打包到 ${DIST_DIR}（exe + 许可证 + README；Qt 运行时由发行版提供）"
         VERBATIM)
 endif()
@@ -224,7 +224,7 @@ endif()
 # 用 cmake --install 分发时许可证也必须跟着走：GPL 第 4/6 条要求随二进制
 # 一并提供许可证文本，LGPL 同样要求附上声明。缺了这一条，装出来的目录
 # 就是"没有许可证的二进制"，比不发布还糟。
-install(TARGETS qtfiogui RUNTIME DESTINATION .)
+install(TARGETS disktest RUNTIME DESTINATION .)
 install(FILES
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${CMAKE_SOURCE_DIR}/THIRD-PARTY-NOTICES.md"

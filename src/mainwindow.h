@@ -71,7 +71,7 @@ public:
     void setSelfTestScatter(bool scatter);
     /// 自检时只跑读取阶段（用来验证「有文件才能只读」这条路径）。
     void setSelfTestReadOnly(bool readOnly);
-    /// 自检：把折线图切到低密度（每 3 点画 1 点）。
+    /// 自检：把折线图切到低密度（按数据量自动抽稀）。
     void setSelfTestLowDensity(bool low);
     /// 自检：测试圈数。
     void setSelfTestRounds(int rounds);

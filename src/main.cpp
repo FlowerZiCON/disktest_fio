@@ -29,16 +29,16 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("qtfiogui"));
+    app.setApplicationName(QStringLiteral("disktest"));
 
     // 版本号只有 CMakeLists.txt 的 project(... VERSION) 一个来源，
     // 别在这里写死——写死就会出现"标题栏 2.2.7、--version 输出 2.0.0"这种不一致。
     app.setApplicationVersion(kAppVersion);
-    app.setOrganizationName(QStringLiteral("qtfiogui"));
+    app.setOrganizationName(QStringLiteral("disktest"));
     app.setWindowIcon(QIcon(QStringLiteral(":/logo-window.png")));
 
     // 结果 CSV 解析器的纯逻辑自检：不开窗口、不碰磁盘、不跑 fio。
-    // 写代码时用 `qtfiogui.exe --selftest-parse` 就能验规则，不用整盘测试。
+    // 写代码时用 `disktest.exe --selftest-parse` 就能验规则，不用整盘测试。
     if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QLatin1String("--selftest-parse")) {
         QStringList lines;
         const bool ok = RunData::runParserSelfTest(&lines);

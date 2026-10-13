@@ -34,7 +34,7 @@
 ## 快速开始
 
 1. **下载发布包**，解压到任意目录（路径带中文也没问题）。
-2. 双击 **`qtfiogui.exe`**。
+2. 双击 **`disktest.exe`**。
    不需要另外装 Qt，也不需要装 VC++ 运行库——发布包是自足的。
 3. 在左侧「选择磁盘」列表里展开一块盘，**单击选中它下面的那个分区**（文件系统）。
    列表里灰色的行表示测不了（只读 / 未挂载 / 没有可写目录）。
@@ -150,14 +150,14 @@ build.bat package
 sudo apt install build-essential cmake ninja-build qt6-base-dev libqt6charts6-dev fio
 cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-linux -j
-./build-linux/qtfiogui
+./build-linux/disktest
 ```
 
 Linux 上不用自备 fio，发行版装的 `/usr/bin/fio` 就能用。
 没有图形界面的机器（服务器 / CI）上跑自检：
 
 ```bash
-QT_QPA_PLATFORM=offscreen ./build-linux/qtfiogui --selftest \
+QT_QPA_PLATFORM=offscreen ./build-linux/disktest --selftest \
     --outdir /tmp/st --selftest-target /mnt/testdisk --selftest-fill-limit 200
 ```
 

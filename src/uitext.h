@@ -25,17 +25,17 @@
 // ---------------------------------------------------------------- 应用信息
 // 版本号在 CMakeLists.txt 的 project(... VERSION x.y.z) 里改，
 // 不要在这里写死——这里只是把编译期传进来的宏兜个底。
-#ifndef QTFIOGUI_VERSION
-#  define QTFIOGUI_VERSION "0.0.0"
+#ifndef DISKTEST_VERSION
+#  define DISKTEST_VERSION "0.0.0"
 #endif
 
 /// 编译时间：只在 mainwindow.cpp 重新编译时才会更新。
-#define QTFIOGUI_BUILD_DATE __DATE__
-#define QTFIOGUI_BUILD_TIME __TIME__
+#define DISKTEST_BUILD_DATE __DATE__
+#define DISKTEST_BUILD_TIME __TIME__
 
 inline const QString kAppName    = QStringLiteral("磁盘测试By MOONLIGHT");
-inline const QString kAppVersion = QStringLiteral(QTFIOGUI_VERSION);
-inline const QString kBuildTime  = QStringLiteral(QTFIOGUI_BUILD_DATE " " QTFIOGUI_BUILD_TIME);
+inline const QString kAppVersion = QStringLiteral(DISKTEST_VERSION);
+inline const QString kBuildTime  = QStringLiteral(DISKTEST_BUILD_DATE " " DISKTEST_BUILD_TIME);
 
 /// —— 下面三项请改成你自己的信息 ——
 inline const QString kAuthor  = QStringLiteral("MOONLIGHT");
@@ -223,9 +223,9 @@ inline const QString kDensityHigh    = QStringLiteral("高密度");
 inline const QString kDensityLow     = QStringLiteral("低密度");
 inline const QString kDensityLowTip  =
     QStringLiteral("折线图按数据量自动抽稀：\n"
-                   "  < 128 GiB → 每 3 个点画 1 个\n"
-                   "  128 GiB ~ 1 TiB → 每 5 个点画 1 个\n"
-                   "  ≥ 1 TiB → 每 10 个点画 1 个\n"
+                   "  < 256 GiB → 每 5 个点画 1 个\n"
+                   "  256 GiB ~ 1 TiB → 每 15 个点画 1 个\n"
+                   "  ≥ 1 TiB → 每 30 个点画 1 个\n"
                    "散点图和保存的 CSV 始终是全量数据。");
 inline const QString kDensityHighTip = QStringLiteral("折线图绘制全部采样点");
 inline const QString kSeriesRead     = QStringLiteral("读取速度");
@@ -299,6 +299,8 @@ inline const QString kAboutHtml               =
                    "</table>"
                    "<p>本程序仅调用 fio，未对 fio 做任何修改；"
                    "Qt 为动态链接，随程序一起分发的 Qt 运行库可自行替换。</p>"
+                   "<p>本项目是开源项目，使用GPL3.0许可证"
+                   "开源地址：https://github.com/FlowerZiCON/disktest_fio</p>"
                    "<p>完整许可条款随程序一起分发，见程序目录的 <code>licenses</code> 子目录："
                    "<code>fio-COPYING.txt</code>（fio）、<code>Qt-LGPLv3.txt</code>（Qt）。</p>");
 inline const QString kDlgAboutTitle           = QStringLiteral("关于");
@@ -484,7 +486,7 @@ inline const QString kTextNone               = QStringLiteral("无");
 inline const QString kTextNotObserved        = QStringLiteral("(没观察到)");
 
 // ── 自检报告正文 ──
-inline const QString kReportStepProbe128GiB  = QStringLiteral("128 GiB（下边界）");
+inline const QString kReportStepProbe256GiB  = QStringLiteral("256 GiB（下边界）");
 inline const QString kReportStepProbe1TiB    = QStringLiteral("1 TiB（下边界）");
 inline const QString kReportTitle            = QStringLiteral("==================== 硬盘可靠性测试工具 自检报告 ====================\n");
 inline const QString kReportQtVersion        = QStringLiteral("Qt 版本            : ");
@@ -587,7 +589,7 @@ inline const QString kClMode         = QStringLiteral("自检用的读写模式�
 inline const QString kClStopAfter    = QStringLiteral("自检时在第 N 秒触发一次「停止」，验证停止路径");
 inline const QString kClScatter      = QStringLiteral("自检时把绘图方式切到散点图（默认折线图）");
 inline const QString kClReadOnly     = QStringLiteral("自检时只跑读取阶段（验证「有文件才能只读」）");
-inline const QString kClLowDensity   = QStringLiteral("自检时把折线图切到低密度（每 3 点画 1 点）");
+inline const QString kClLowDensity   = QStringLiteral("自检时把折线图切到低密度（按数据量自动抽稀）");
 inline const QString kClSaveData     = QStringLiteral("自检跑完后把测试数据保存到这个 CSV");
 inline const QString kClLoadData     = QStringLiteral("自检直接加载这个 CSV 画图并出报告，不跑测试");
 

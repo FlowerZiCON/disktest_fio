@@ -105,19 +105,21 @@
 
 | 数据量 | 步长 |
 | --- | --- |
-| < 128 GiB | 每 **3** 个点画 1 个 |
-| 128 GiB ~ 1 TiB | 每 **5** 个点画 1 个 |
-| ≥ 1 TiB | 每 **10** 个点画 1 个 |
+| < 256 GiB | 每 **5** 个点画 1 个 |
+| 256 GiB ~ 1 TiB | 每 **15** 个点画 1 个 |
+| ≥ 1 TiB | 每 **30** 个点画 1 个 |
 
 界面上的步长提示已经不显示了（需求：移除低密度提示），分档只影响曲线的疏密。
 自检对分档边界有精确断言：
 
 ```
 折线抽稀步长（自动分档）: PASS
-    127 GiB → 每 3 个点画 1 个  OK
-    128 GiB（下边界） → 每 5 个点画 1 个  OK
-    1023 GiB → 每 5 个点画 1 个  OK
-    1 TiB（下边界） → 每 10 个点画 1 个  OK
+    100 GiB → 每 5 个点画 1 个  OK
+    255 GiB（下边界前一档） → 每 5 个点画 1 个  OK
+    256 GiB（下边界） → 每 15 个点画 1 个  OK
+    1023 GiB → 每 15 个点画 1 个  OK
+    1 TiB（下边界） → 每 30 个点画 1 个  OK
+    4 TiB → 每 30 个点画 1 个  OK
 ```
 
 实测同一轮测试：
@@ -315,7 +317,7 @@
 - 「帮助 → 关于」：版本、作者、联系作者、**编译时间**、构建环境（Qt 版本 /
   提权或普通模式），下面接测试流程说明。
 - 版本号只有 **`CMakeLists.txt` 里 `project(... VERSION x.y.z)` 一个来源**，
-  编译期以 `QTFIOGUI_VERSION` 宏传进代码，标题栏和「关于」都取自它，改一处即可。
+  编译期以 `DISKTEST_VERSION` 宏传进代码，标题栏和「关于」都取自它，改一处即可。
 - 作者与联系方式是 `src/uitext.h` 顶部的 `kAuthor` / `kContact`，
   **默认是占位符，请改成你自己的**。
 
@@ -498,7 +500,7 @@ CSV 里存的是**整轮**（写入 + 读取）的数据，不是只有最后一
 解析规则本身有独立的纯逻辑自检（不开窗口、不碰磁盘、不跑 fio）：
 
 ```
-build\qtfiogui.exe --selftest-parse
+build\disktest.exe --selftest-parse
 ```
 
 它覆盖：性能格式、老格式兼容、`item/pass` 归位、分阶段平均值取值、
@@ -715,7 +717,7 @@ build.bat help                               全部用法
 **机制**：这台机器上的 `build.ninja` 里，编译规则是
 
 ```
-build CMakeFiles\qtfiogui.dir\src\mainwindow.cpp.obj: CXX_COMPILER__qtfiogui_unscanned_Release ...
+build CMakeFiles\disktest.dir\src\mainwindow.cpp.obj: CXX_COMPILER__disktest_unscanned_Release ...
   deps = gcc
 ```
 
@@ -781,7 +783,7 @@ cmake --build build --target package      # 产出 build\dist
 
 ```
 dist/
-  qtfiogui.exe                主程序（含图标）
+  disktest.exe                主程序（含图标）
   Qt6Core/Gui/Widgets/Charts/... .dll
   platforms/qwindows.dll      平台插件（少了它 Qt 起不来）
   styles/ imageformats/ iconengines/ networkinformation/ tls/ generic/
@@ -806,7 +808,7 @@ Qt 是 `/MD` 构建的，所以本程序必须跟着动态链接 CRT（不能静
 sudo apt install build-essential cmake ninja-build qt6-base-dev libqt6charts6-dev fio
 cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-linux -j
-./build-linux/qtfiogui
+./build-linux/disktest
 ```
 
 | 依赖 | 要求 | Ubuntu 22.04 (jammy) 里的包 |
@@ -835,7 +837,7 @@ cmake --build build-linux -j
 没有图形界面的机器（服务器 / CI）上跑自检：
 
 ```bash
-QT_QPA_PLATFORM=offscreen ./build-linux/qtfiogui --selftest \
+QT_QPA_PLATFORM=offscreen ./build-linux/disktest --selftest \
     --outdir /tmp/st --selftest-target /mnt/testdisk --selftest-fill-limit 200
 ```
 
@@ -991,13 +993,26 @@ btrfs 子卷），而"我想测这块盘"跟它挂在哪儿没有关系。所以
 
 ```
 磁盘 / 分区              可测目录 / 说明    已用 / 总空间   使用量
-▼ sda  VMware, V...     [系统盘]          238.0 GiB
-    sda1  ext4  /        /home/moonli...   198/233 GiB    84.8%
-▼ nvme0n1  Samsung...                     931 GiB
-    nvme0n1p2  ext4  /   /var/tmp          560/931 GiB    60.2%
-  loop12                 [虚拟设备]         1.5 GiB
+▼ VMware, VMware Virtual S   [系统盘]        238.0 GiB
+    sda1  ext4  /            /home/moonli... 198/233 GiB    84.8%
+▼ Samsung SSD 990 PRO 1TB                   931 GiB
+    nvme0n1p2  ext4  /       /var/tmp        560/931 GiB    60.2%
+  loop12                     [虚拟设备]       1.5 GiB
     loop12  ext4  /mnt/testdisk  /mnt/testdisk  0.1/1.4 GiB  6.3%
 ```
+
+**磁盘那一行只显示型号**，设备名（Windows 的 `PhysicalDrive0`、Linux 的 `sda`）
+不进列表 —— 它对用户没意义，却占掉第一列一大半宽度，把型号挤成省略号。
+要和"磁盘管理"或 `lsblk` 对照时，把鼠标停在那一行上：
+
+```
+设备: PhysicalDrive0
+UMIS RPJYJ1T24MLR1HWY
+[系统盘]
+```
+
+（拿不到型号的盘只能退回显示设备名，否则这一行整个是空白。）
+自检报告里仍然是「设备名 + 型号」——那边不缺宽度，而且排查问题时设备名有用。
 
 选中的永远是**文件系统**那一层 —— 本工具只能测文件系统（裸设备一律拒绝）。
 上面那层只是分组标题（不可选），测不了的分区（只读 / 未挂载 / 没有可写目录）
@@ -1157,12 +1172,26 @@ read_bytes: 8044675072     ← 数据明明在
 > 性能测试**不受影响**：它固定单文件（见 `planFilesForSize`），
 > `openfiles` 对它没有意义，job 里也不写这一行。
 
-> **还没做的**：这个改动对"波动到底小了多少"的量化对比。
-> 在开发机上用 256 MiB 的小数据集 + fio 自带的 `--write_bw_log` 试过一次，
-> **结论不可用**：吞吐跑到 2.5~5 GiB/s，说明这点数据整个被盘的缓存吃掉了，
-> 500 ms 的采样间隔比效应本身还大，测出来的是噪声。
-> 要量准得用一块远大于缓存的数据集 + 真实的机械盘 / U 盘，
-> 也就是用户实际遇到波动的场景。
+> **关于"波动到底小了多少"**：三次尝试都没能在测试机上量出差别，结论如实记在这里。
+>
+> 1. 开发机、256 MiB 小数据集 + fio 的 `--write_bw_log`：**作废** ——
+>    吞吐跑到 2.5~5 GiB/s，这点数据整个被盘的缓存吃掉了，采样间隔比效应还大。
+> 2. Ubuntu 上的 10 GiB 回环盘、4 × 2 GiB（数据集远大于内存，采样 500 ms）：
+>    两臂**没有区别**（波动 136% vs 136%，最小采样都掉到 8~24 MiB/s）。
+>    原因：回环设备后端是宿主页缓存 —— fio 的 `O_DIRECT` 落到 loop 驱动之后
+>    又变成了对 backing file 的缓冲写，测到的是宿主的写回行为。
+> 3. 换成真实 ext4（`/home`，`O_DIRECT` 直达块层）、同样 4 × 2 GiB：
+>    仍然**没有区别**（波动 117%~164%，四条曲线的最小采样都一样低）。
+>
+> 也就是说：在这两种存储上，**残余的波动来自平台的周期性停顿**
+> （四条曲线都有，与打开几个文件无关），而不是文件并行度。
+> 这也说得通 —— 交错的写入对**闪存 / 虚拟磁盘**几乎没有代价（没有寻道），
+> 对**机械盘和 U 盘**才会有明显的寻道与缓存抖动，也就是用户实际看到波动的场景。
+>
+> **所以这个改动是否真的压平了曲线，需要在看到波动的那块盘上复测**：
+> 用同一个 job 跑 `fio ... /tmp/ab.fio` 与 `fio --openfiles=1 ... /tmp/ab.fio`，
+> 加 `--write_bw_log=x --log_avg_msec=500`，比较两臂 `x_write_bw.log` 的
+> min/avg/max。在闪存上预期看不到差别，在机械盘上才应该看得到。
 
 ---
 
@@ -1172,7 +1201,7 @@ read_bytes: 8044675072     ← 数据明明在
 只写一小部分就能走完整流程：
 
 ```powershell
-build\qtfiogui.exe --selftest `
+build\disktest.exe --selftest `
     --fio third_party\fio\fio.exe --outdir build\selftest `
     --selftest-target G:/ --selftest-fill-limit 3000
 ```
@@ -1212,7 +1241,7 @@ build\qtfiogui.exe --selftest `
 ## 7. 目录结构
 
 ```
-qtfiogui/
+disktest/
 ├─ LICENSE                  本程序自身的许可证（GPL-3.0 官方原版全文）
 ├─ THIRD-PARTY-NOTICES.md   Qt / fio / MSVC 运行库的许可证说明
 ├─ licenses/                第三方许可证文本（随发布包一起走）
@@ -1264,14 +1293,14 @@ qtfiogui/
 └─ _selftest/               【生成】手工跑自检时的默认输出目录
 ```
 
-**运行时**只需要 `qtfiogui.exe` + Qt DLL + `fio/fio.exe`；`docs/`、`tools/`、`src/` 都不进 `build\dist`。
+**运行时**只需要 `disktest.exe` + Qt DLL + `fio/fio.exe`；`docs/`、`tools/`、`src/` 都不进 `build\dist`。
 `build\dist` 里额外带 `licenses/`（含 `THIRD-PARTY-NOTICES.md`）——**这是分发二进制时必须有的**，
 `build.bat package` 打完包会自动核对，缺了直接报错。
 
 > `third_party/fio/` 里**不含** fio 上游的 `examples/`（55 个样例 `.fio`）。
 > 程序一个都不读，打包时本来就排除，放在仓库里只是噪音；需要看示例去 fio 上游拿。
 
-**运行时**只需要 `qtfiogui.exe` + Qt DLL + `fio/fio.exe`；`docs/`、`tools/`、`src/` 都不进 `build\dist`。
+**运行时**只需要 `disktest.exe` + Qt DLL + `fio/fio.exe`；`docs/`、`tools/`、`src/` 都不进 `build\dist`。
 
 ### 启动状态是固定的，不记忆
 

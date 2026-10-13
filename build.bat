@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================================
-rem  qtfiogui - Disk Reliability Tester : one-click build script
+rem  disktest - Disk Reliability Tester : one-click build script
 rem
 rem  Double-click  = configure + build Release.
 rem  With options  = see  build.bat help
@@ -86,9 +86,9 @@ if not defined VCVARS (
     if not defined VS_DIR (
         set "VSWHERE=!PF86!\Microsoft Visual Studio\Installer\vswhere.exe"
         if exist "!VSWHERE!" (
-            "!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%TEMP%\qtfiogui_vs.txt" 2>nul
-            set /p VS_DIR=<"%TEMP%\qtfiogui_vs.txt"
-            del "%TEMP%\qtfiogui_vs.txt" >nul 2>&1
+            "!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%TEMP%\disktest_vs.txt" 2>nul
+            set /p VS_DIR=<"%TEMP%\disktest_vs.txt"
+            del "%TEMP%\disktest_vs.txt" >nul 2>&1
         )
     )
     if defined VS_DIR if exist "!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat"
@@ -189,10 +189,10 @@ if errorlevel 1 (
 )
 
 rem Ninja is single-config: output lands in build\. VS generator: build\Release\.
-set "EXE=!BUILD_DIR!\Release\qtfiogui.exe"
-if not exist "!EXE!" set "EXE=!BUILD_DIR!\qtfiogui.exe"
+set "EXE=!BUILD_DIR!\Release\disktest.exe"
+if not exist "!EXE!" set "EXE=!BUILD_DIR!\disktest.exe"
 if not exist "!EXE!" (
-    echo [ERROR] Build finished but qtfiogui.exe was not found.
+    echo [ERROR] Build finished but disktest.exe was not found.
     exit /b 1
 )
 echo.
@@ -386,7 +386,7 @@ exit /b 2
 
 :print_usage
 echo.
-echo  qtfiogui - Disk Reliability Tester : build script
+echo  disktest - Disk Reliability Tester : build script
 echo.
 echo  Usage:  build.bat [action] [options]
 echo.

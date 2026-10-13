@@ -63,9 +63,16 @@ struct DiskEntry
     /// 至少有一个文件系统能被测（否则整块盘在列表里就没有意义）。
     bool testable() const;
     /// "内核名 + 型号"，例如 "nvme0n1  Samsung SSD 990 PRO 1TB"。
-    /// 列表里第一列用这个 —— 标记（[系统盘] 之类）单独占一列，
-    /// 否则列宽一紧就先被省略号吃掉，而那恰恰是最该看见的东西。
+    /// **给自检报告用**（那边不缺宽度，设备名方便和磁盘管理工具对照）。
     QString nameLine() const;
+    /// 列表里磁盘那一行显示的东西：**只给型号**。
+    ///
+    /// 内核名（Windows 的 "PhysicalDrive0"、Linux 的 "sda"）不进列表 ——
+    /// "PhysicalDrive0" 对用户是个看不懂的 API 名字，却占掉第一列一大半宽度，
+    /// 把真正有用的型号挤成省略号。它现在只在鼠标悬停的 tooltip 里出现。
+    ///
+    /// 拿不到型号时只能退回内核名，否则这一行就整个空白。
+    QString modelLine() const;
     /// nameLine() 再加上 [系统盘] / [虚拟设备] 这些标记，给自检报告用（那边不缺宽度）。
     QString displayLine() const;
 };

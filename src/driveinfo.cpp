@@ -532,6 +532,12 @@ QString DiskEntry::nameLine() const
     return kernelName + QStringLiteral("  ") + model;
 }
 
+QString DiskEntry::modelLine() const
+{
+    // 型号是这一行唯一该显示的东西；没有型号才退回内核名，免得整行空白
+    return model.isEmpty() ? kernelName : model;
+}
+
 QString DiskEntry::displayLine() const
 {
     QString line = nameLine();
