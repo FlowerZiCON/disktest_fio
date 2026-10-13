@@ -260,7 +260,14 @@ inline const QString kStatusStopping         = QStringLiteral("正在停止…")
 
 // ── 对话框与提示 ──
 inline const QString kDlgChooseFioTitle       = QStringLiteral("选择 fio 可执行文件");
+#ifdef Q_OS_WIN
 inline const QString kFilterExecutable        = QStringLiteral("可执行文件 (*.exe);;所有文件 (*)");
+#else
+/// Linux 上可执行文件**没有扩展名** —— 随包发布的那个就叫 `fio`。
+/// 按 `*.exe` 过滤会把 fio 本身藏起来，对话框里一个文件都挑不到。
+/// 权限位（可执行）没法用名字通配符表达，所以这里只能放开成全部文件。
+inline const QString kFilterExecutable        = QStringLiteral("所有文件 (*)");
+#endif
 inline const QString kDlgCleanupTitle         = QStringLiteral("清理测试文件");
 inline const QString kMsgConfirmCleanup       = QStringLiteral("将删除 %1 里的 %2 个测试文件，共 %3。\n\n确定继续吗？");
 inline const QString kDlgSaveDataTitle        = QStringLiteral("保存测试数据");
@@ -559,7 +566,7 @@ inline const QString kReportDefaultsDetail    =
     QStringLiteral("（可靠性 · 不选盘 · 顺序读写 · iodepth=%1 · 1 圈 · 写入/读取/校验全开 · 性能四项全勾 · 数据 %2 MiB）");
 inline const QString kReportGuardFioLookup    = QStringLiteral("fio 查找规则        : ");
 inline const QString kReportFioLookupDetail   =
-    QStringLiteral("（只看 exe 目录 → 再走 PATH，不扫盘；当前 = %1）");
+    QStringLiteral("（只看程序目录 → 再走 PATH，不扫盘；当前 = %1）");
 inline const QString kReportLoadedItemsFmt    = QStringLiteral("；分出的测试项 = %1 项");
 inline const QString kReportGuardPerfItems    = QStringLiteral("性能四项读写值      : ");
 inline const QString kSelfTestResultWindowFailed =
