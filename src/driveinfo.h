@@ -45,8 +45,15 @@ struct FileSystemEntry
     bool    testable() const { return !suggestedDir.isEmpty(); }
     quint64 bytesUsed() const { return bytesTotal > bytesFree ? bytesTotal - bytesFree : 0; }
     double  usedPercent() const;
-    /// 列表里那一行的主文本，例如 "nvme0n1p2  ext4  /"
+    /// **自检报告**里那一行的主文本，例如 "nvme0n1p2  ext4  /"（不缺宽度，字段给全）
     QString displayLine() const;
+    /// **列表里**"分区"那一行的第一列：只给文件系统本身（NTFS / ext4 / exFAT …）。
+    ///
+    /// 设备名和挂载点都不进这一列：Windows 上原来是 "C:  NTFS  C:/"，
+    /// 其中挂载点 `C:/` 和后面那列的盘符是同一个东西，一行里出现两遍；
+    /// 而设备名（PhysicalDrive0 / sda1）已经在上层磁盘行和悬停提示里了。
+    /// 拿不到文件系统类型时退回设备名，否则这一行会空着。
+    QString fsLine() const;
 };
 
 /// 一块物理磁盘（也可能是 RAID / 加密 / 回环这类块设备），下面挂着它的文件系统。

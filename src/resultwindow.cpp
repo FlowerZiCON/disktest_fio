@@ -35,10 +35,16 @@
 
 namespace {
 
-/// 折线抽稀：结果窗口里的点比实时采集少得多，按点数量级选一档就够。
-int stepForCount(int count)
+/// 回看用的密度档：文件里记了 density 就照它，老文件（只有 line_step）说明
+/// 当年是按低密度抽着看的 —— 跟着它，用户看到的疏密和当初一致。
+bool lowDensityFor(const RunData &data)
 {
-    return count > 600 ? 5 : 3;
+    const QString recorded = data.param(QStringLiteral("density"));
+    if (recorded == QLatin1String("low"))
+        return true;
+    if (recorded == QLatin1String("high"))
+        return false;
+    return data.paramDouble(QStringLiteral("line_step"), 0.0) > 1.0;
 }
 
 } // namespace
@@ -240,7 +246,7 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     // 横坐标在解析时就算好了（要用到文件序号 + 单文件大小，
     // 光有 fio 报的"文件内偏移"定位不到盘上的位置）。
     // 必须放在画完曲线**之后**：addVerifyMarker 会触发一次重绘，
-    // 放在前面会被后面的 clear()/appendSample 冲掉。
+    // 放在前面会被上面的 clear() 冲掉（clear 会清空标记列表）。
     for (double x : m_data.verifyAxisX()) {
         if (x >= 0.0)
             m_chart->addVerifyMarker(x);
@@ -251,7 +257,8 @@ void ResultWindow::rebuildReliabilityChart()
 {
     m_chart->clear();
     m_chart->setCapacityAxis(m_data.axisMaxGiB());
-    m_chart->setLineStep(stepForCount(m_data.sampleCount()));
+    m_chart->setDensity(lowDensityFor(m_data) ? SpeedChart::Density::Low
+                                              : SpeedChart::Density::High);
 
     const bool plotRead = std::any_of(m_data.flags.cbegin(), m_data.flags.cend(),
                                       [](quint8 f) { return (f & 1) != 0; });
@@ -350,7 +357,8 @@ void ResultWindow::rebuildPerfChart(int item)
 
     m_chart->clear();
     m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    m_chart->setLineStep(stepForCount(qMax(trace.read.size(), trace.write.size())));
+    // 性能项每趟才 20 来个点，抽稀没有意义 —— 固定高密度全画
+    m_chart->setDensity(SpeedChart::Density::High);
     m_chart->setDirections(!trace.read.isEmpty(), !trace.write.isEmpty());
 
     const int count = qMax(trace.read.size(), trace.write.size());
@@ -363,11 +371,10 @@ void ResultWindow::rebuildPerfChart(int item)
                               hasWrite ? trace.write.at(i).y() : 0.0);
     }
     // 末点必须画出来：每一趟的末尾是 10.0 秒那个收尾补点，
-    // 它落在第 21 个位置上、不是 step 的整数倍，光靠抽稀会被丢掉，
-    // 曲线就停在 9.5 秒、右边缘空一格。
+    // 曲线不能停在 9.5 秒、右边缘空一格。两个抽稀函数都显式保留首末点，
+    // 所以 refreshPlot 一跑就满足。
     m_chart->finishSamples();
-    // 颜色必须放在**画完点之后**：appendSample 的抽稀逻辑会重设画笔，
-    // 放前面会被覆盖，画出来还是默认的红蓝。
+    // 颜色随时可设：refreshPlot 只灌数据，不碰画笔
     m_chart->setSeriesColors(readColor, writeColor);
 
     // 只显示这一项：图表上不可能同时画四条线，所以固定"一次一项"，
@@ -380,7 +387,7 @@ void ResultWindow::rebuildPerfCombinedChart()
     m_selectedItem = -1;
     m_chart->clear();
     m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    m_chart->setLineStep(stepForCount(m_data.sampleCount()));
+    m_chart->setDensity(SpeedChart::Density::High);   // 性能项点很少，全画
     m_chart->setDirections(true, true);
     for (int i = 0; i < m_data.sampleCount(); ++i) {
         const quint8 f = m_data.flags.value(i, 0);

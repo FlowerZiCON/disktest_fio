@@ -575,6 +575,11 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     m_driveTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_driveTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_driveTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    // QTreeView 的表头**默认**把"最后一列"拉伸填满剩余宽度，而这里真正该吃掉
+    // 剩余宽度的是第 1 列（分区，它是 Stretch）。不关掉这个，多出来的宽度会跑到
+    // "使用量"上 —— 那一列只需要放下 "100.0%" 五个字符，结果宽出一倍，
+    // 而"分区"那一列反倒被挤成省略号。
+    m_driveTree->header()->setStretchLastSection(false);
     connect(m_driveTree, &QTreeWidget::itemSelectionChanged,
             this, &MainWindow::onDriveSelectionChanged);
 
@@ -988,12 +993,11 @@ void MainWindow::applyDensity()
     if (!m_chart)
         return;
 
-    // 高密度 = 把全部采样点都画出来；低密度 = 按数据量自动抽稀。
-    // 无论哪档，散点图和保存的 CSV 都是全量数据。
-    const int step = m_densityLowRadio->isChecked()
-                         ? SpeedChart::autoStepForBytes(m_axisByteTotal)
-                         : 1;
-    m_chart->setLineStep(step);
+    // 高密度 = 每个采样点都画；低密度 = 抽稀到"屏幕能分辨的点数"。
+    // **不再按容量分档**（那是错的：容量大不等于点多）。抽稀的目标点数由
+    // 坐标区的像素宽决定，见 SpeedChart::targetPointCount()。
+    m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                       : SpeedChart::Density::High);
 }
 
 // ---------------------------------------------------------------- 目标位置
@@ -1114,7 +1118,9 @@ bool MainWindow::refreshDriveList(bool startup)
         // ---- 第二层：这块盘上的文件系统，这才是可选的目标 ----
         for (const FileSystemEntry &fs : disk.fileSystems) {
             auto *fsItem = new QTreeWidgetItem(diskItem);
-            fsItem->setText(0, fs.displayLine());
+            // 第一列只写文件系统本身（NTFS / ext4 / exFAT）：设备名在上层磁盘行和
+            // 悬停提示里，挂载点在右边那列（分区）里，写在这里就是一行出现两遍。
+            fsItem->setText(0, fs.fsLine());
             fsItem->setText(1, fs.testable()
                                    ? fs.suggestedDir
                                    : QStringLiteral("✗ ") + fs.unavailableReason);
@@ -1824,7 +1830,6 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
     param(QStringLiteral("plot_style"),
           m_chart->plotStyle() == SpeedChart::PlotStyle::Scatter ? QStringLiteral("scatter")
                                                                  : QStringLiteral("line"));
-    param(QStringLiteral("line_step"), QString::number(m_chart->lineStep()));
     param(QStringLiteral("density"),
           m_densityLowRadio->isChecked() ? QStringLiteral("low") : QStringLiteral("high"));
     for (const PhaseOutcome &outcome : m_outcomes) {
@@ -1947,8 +1952,12 @@ static void fillChartFromRunData(const RunData &data, SpeedChart *chart)
                                       [](quint8 f) { return (f & 1) != 0; });
     const bool plotWrite = std::any_of(data.flags.cbegin(), data.flags.cend(),
                                        [](quint8 f) { return (f & 2) != 0; });
-    // 折线抽稀步长：文件里记了就照它画，没有就按数据量自动选
-    const int recordedStep = int(data.paramDouble(QStringLiteral("line_step"), 0.0));
+    // 密度档：优先看文件里记的 density；老文件只记了 line_step，
+    // 那就"当年抽过稀 → 现在按低密度画"，保持用户当初看到的样子。
+    const QString densityParam = data.param(QStringLiteral("density"));
+    const bool lowDensity = (densityParam == QLatin1String("low"))
+                            || (densityParam.isEmpty()
+                                && data.paramDouble(QStringLiteral("line_step"), 0.0) > 1.0);
 
     chart->clear();
     chart->setPlotStyle(data.param(QStringLiteral("plot_style")) == QLatin1String("scatter")
@@ -1963,8 +1972,7 @@ static void fillChartFromRunData(const RunData &data, SpeedChart *chart)
         chart->setCapacityAxis(data.axisMaxGiB());
     }
     chart->setDirections(plotRead, plotWrite);
-    if (recordedStep > 0)
-        chart->setLineStep(recordedStep);
+    chart->setDensity(lowDensity ? SpeedChart::Density::Low : SpeedChart::Density::High);
 
     for (int i = 0; i < data.sampleCount(); ++i) {
         const quint8 f = data.flags.value(i, 0);
@@ -3568,8 +3576,7 @@ void MainWindow::showPerfItemTrace(int itemIndex)
                               hasWrite ? writeTrace.at(i).y() : 0.0);
     }
 
-    // 颜色必须放在**画完点之后**：appendSample 的抽稀逻辑会重设画笔，
-    // 放前面会被覆盖，结果画出来还是上一项（随机项）的黄绿。
+    // 颜色随时可设：refreshPlot 只灌数据，不碰画笔
     m_chart->setSeriesColors(readColor, writeColor);
 
     statusBar()->showMessage(kTraceShownTip.arg(FioConfig::perfItemName(item)));
@@ -4030,27 +4037,48 @@ void MainWindow::writeSelfTestReport()
     const QIcon windowIcon = QApplication::windowIcon();
     const bool iconGuard = !windowIcon.isNull() && !windowIcon.availableSizes().isEmpty();
 
-    // 折线抽稀步长的分档必须精确（<256GiB → 5，256GiB~1TiB → 15，≥1TiB → 30）
-    constexpr qint64 kGiB = 1024LL * 1024 * 1024;
-    constexpr qint64 kTiB = 1024LL * kGiB;
-    const struct { qint64 bytes; int want; QString note; } stepProbes[] = {
-        {100LL * kGiB,        5,  QStringLiteral("100 GiB")},
-        {255LL * kGiB,        5,  QStringLiteral("255 GiB（下边界前一档）")},
-        {256LL * kGiB,        15, kReportStepProbe256GiB},
-        {1023LL * kGiB,       15, QStringLiteral("1023 GiB")},
-        {1LL * kTiB,          30, kReportStepProbe1TiB},
-        {4LL * kTiB,          30, QStringLiteral("4 TiB")},
+    // 抽稀的两条性质必须成立，否则"低密度"就会丢信息：
+    //   1) 点数压到目标值，且**首末点保留**（曲线两端要落在真实数据上）；
+    //   2) **一次突然的掉速不能被抽掉** —— 那正是这个工具要靠曲线看的东西。
+    // 这里造一条 5000 点、中间只有一处深谷（第 2500 点）的序列来验：
+    // 等间隔取样必然错过它，LTTB 必须留住它。
+    QList<QPointF> spikeData;
+    spikeData.reserve(5000);
+    for (int i = 0; i < 5000; ++i)
+        spikeData.append(QPointF(i * 0.02, (i == 2500) ? 12.0 : 200.0 + (i % 7)));
+
+    const QList<QPointF> lttbThin = SpeedChart::reduceLttb(spikeData, 500);
+    double lttbMinY = 1e9;
+    for (const QPointF &p : lttbThin)
+        lttbMinY = qMin(lttbMinY, p.y());
+
+    const QList<QPointF> evenThin = SpeedChart::reduceEvenly(spikeData, 500);
+    double evenMinY = 1e9;
+    for (const QPointF &p : evenThin)
+        evenMinY = qMin(evenMinY, p.y());
+
+    // 目标点数比原序列大时原样返回（没有可抽的）
+    const bool noReduceGuard = (SpeedChart::reduceLttb(spikeData, 9000).size() == 5000)
+                               && (SpeedChart::reduceEvenly(spikeData, 9000).size() == 5000);
+
+    const struct { QString note; bool ok; } stepChecks[] = {
+        { QStringLiteral("LTTB 压到 500 点、首末点保留"),
+          lttbThin.size() == 500 && lttbThin.first() == spikeData.first()
+              && lttbThin.last() == spikeData.last() },
+        { QStringLiteral("LTTB 保住深谷（原谷值 12.0，抽稀后最小值 %1）").arg(lttbMinY, 0, 'f', 1),
+          lttbMinY < 50.0 },
+        { QStringLiteral("等间隔取样也压到 500 点、首末点保留（但它会错过深谷：%1）")
+              .arg(evenMinY, 0, 'f', 1),
+          evenThin.size() == 500 && evenThin.first() == spikeData.first()
+              && evenThin.last() == spikeData.last() },
+        { QStringLiteral("目标点数大于原序列时原样返回"), noReduceGuard },
     };
     bool stepGuard = true;
     QStringList stepLines;
-    for (const auto &probe : stepProbes) {
-        const int got = SpeedChart::autoStepForBytes(probe.bytes);
-        const bool ok = (got == probe.want);
-        stepGuard = stepGuard && ok;
-        stepLines << kSelfTestStepLine
-                         .arg(probe.note)
-                         .arg(got)
-                         .arg(ok ? QStringLiteral("OK") : kSelfTestViolation);
+    for (const auto &check : stepChecks) {
+        stepGuard = stepGuard && check.ok;
+        stepLines << kSelfTestStepLine.arg(check.note,
+                                           check.ok ? QStringLiteral("OK") : kSelfTestViolation);
     }
 
     bool noProblems = true;

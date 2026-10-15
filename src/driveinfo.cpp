@@ -516,6 +516,12 @@ QString FileSystemEntry::displayLine() const
     return kFsRowLine.arg(kernelName, fileSystem, where);
 }
 
+QString FileSystemEntry::fsLine() const
+{
+    // 只给文件系统；拿不到类型才退回设备名，免得整行空白
+    return fileSystem.isEmpty() ? kernelName : fileSystem;
+}
+
 bool DiskEntry::testable() const
 {
     for (const FileSystemEntry &fs : fileSystems) {

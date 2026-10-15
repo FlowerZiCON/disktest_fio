@@ -13,6 +13,8 @@
 #pragma once
 
 #include <QColor>
+#include <QList>
+#include <QPointF>
 #include <QVector>
 #include <QWidget>
 
@@ -23,6 +25,7 @@ QT_BEGIN_NAMESPACE
 class QChart;
 class QLineSeries;
 class QScatterSeries;
+class QTimer;
 class QValueAxis;
 QT_END_NAMESPACE
 
@@ -60,8 +63,12 @@ private:
 /// 横轴不是时间，而是**已处理容量（GB）**：开测前就按本次要用的可用空间固定下来，
 /// 之后只往右加点，不再扩轴。写入和读取各自从 0 开始累加（不是首尾相接）。
 ///
-/// 折线图可以按步长抽稀（步长 1 = 全画）。步长通常由数据量自动决定，
-/// 见 autoStepForBytes()。散点图不受影响，始终画全部点。
+/// 折线图 / 散点图都可以抽稀，档位见 Density：高密度全画，低密度按**屏幕像素**
+/// 定目标点数（和数据量无关）。不管哪一档，图表外的数据（CSV、报告）始终是全量。
+///
+/// **性能上有条硬规矩**：`appendSample()` 只往 m_history 里攒，绝不逐点动序列。
+/// `QXYSeries::append()` 在显示中的图表上是 O(当前点数)，逐个加会让整条装载路径
+/// 变成 O(N²)（实测 8214 点要 111 秒，改成批量 replace 后 0.13 秒）。
 class SpeedChart : public QWidget
 {
     Q_OBJECT
@@ -83,13 +90,34 @@ public:
     void      setPlotStyle(PlotStyle style);
     PlotStyle plotStyle() const { return m_style; }
 
-    /// 折线图的抽稀步长：1 = 画全部点，3 = 每 3 个点画 1 个，以此类推。
-    void setLineStep(int step);
-    int  lineStep() const { return m_lineStep; }
+    /// 绘制密度。
+    ///
+    /// 这里**不再按容量分档**（原来 <256GiB 画 1/5、256GiB~1TiB 画 1/15、≥1TiB 画 1/30）。
+    /// 那是错的：容量大不等于采样点多 —— 8000 个点的 117 GiB 和 8000 个点的 1 TiB
+    /// 面临的是同一个渲染问题，而真正决定"能看出多少细节"的是**屏幕上有多少像素**。
+    enum class Density {
+        High,   ///< 高密度：每个采样点都画（忠实，代价随点数线性增长）
+        Low     ///< 低密度：抽稀到"屏幕能分辨的点数"，见 targetPointCount()
+    };
 
-    /// 按数据量自动选抽稀步长：
-    /// < 128 GiB → 3；128 GiB ~ 1 TiB → 5；≥ 1 TiB → 10。
-    static int autoStepForBytes(qint64 totalBytes);
+    void    setDensity(Density density);
+    Density density() const { return m_density; }
+
+    /// 低密度档的目标点数：按**坐标区像素宽**算（约 2 点/像素列），夹在 1000~8000。
+    ///
+    /// 2 点/像素列是因为一条折线每列有 2 个点才看得出"线"而不是台阶。
+    /// 窗口变宽 → 目标变大 → 细节变多；和数据量无关。
+    int targetPointCount() const;
+
+    /// LTTB（Largest-Triangle-Three-Buckets）抽稀：把 src 压到最多 target 个点。
+    ///
+    /// 选它而不是"等间隔取样"是因为它**保尖峰** —— 磁盘测试里一次掉速就是一次尖峰，
+    /// 而尖峰恰恰是最该看见的东西（坏块的直观表现）。首点和末点一定保留。
+    /// 公开出来是为了让自检能直接断言"尖峰不会被抽掉"这条性质。
+    static QList<QPointF> reduceLttb(const QList<QPointF> &src, int target);
+
+    /// 等间隔取点（散点用）。首末点一定保留。
+    static QList<QPointF> reduceEvenly(const QList<QPointF> &src, int target);
 
     /// 横轴用什么单位：可靠性测试用"已处理容量"，性能测试用"时间"。
     enum class AxisMode { Capacity, Time };
@@ -104,20 +132,31 @@ public:
     void setSeriesColors(const QColor &readColor, const QColor &writeColor);
 
     /// 追加一个采样点。readX / writeX 是各自**已处理的容量（GB）**。
+    ///
+    /// **只进 m_history，不动任何序列。** 这一点是性能的关键：
+    /// `QXYSeries::append()` 在显示中的图表上每次都是 O(当前点数)
+    /// （实测：8214 个点逐个 append，散点要 165 秒、折线要 20 秒），
+    /// 整条装载路径因此是 O(N²)。改成"先攒着、之后批量 replace"以后，
+    /// 同样 8214 个点只要 0.15 秒。
+    ///
+    /// 攒到一定时候由内部定时器调 refreshPlot() 批量刷新（见 scheduleRefresh）。
     void appendSample(double readX, bool hasRead, double readMiBs,
                       double writeX, bool hasWrite, double writeMiBs);
 
-    /// 声明"点加完了"：按当前步长重建折线，**保证最后一个点一定画出来**。
+    /// 立刻按当前密度把 m_history 重新画到序列上（批量 replace，一次调用一次刷新）。
     ///
-    /// 为什么需要它：appendSample 的抽稀规则是"每隔 step 个点保留一个"，
-    /// 最后那个点落在哪一格是偶然的——不是 step 的整数倍时就被抽掉了，
-    /// 曲线末端于是够不到横轴右边缘（实测：性能数据每趟停在 9.51 秒，
-    /// 而轴上标的是 10 秒）。边加边画的时候没法知道哪一个是末点，
-    /// 只能由调用方在加完之后说一声；rebuildLineSeries 里对末点有专门的保留逻辑。
+    /// 实时采集那一路由内部定时器自动调；"一次性灌一批数据"的地方
+    /// （加载 CSV、重画某一项）**必须**在灌完之后调一次 finishSamples()。
+    void refreshPlot();
+
+    /// 声明"点加完了"：强制刷新一次。
+    ///
+    /// 除了收尾刷新，它还有个副作用是必须的：末点一定要出现在曲线上
+    /// （曲线末端要够到横轴右边缘）。两个抽稀函数都显式保留首末点，
+    /// 所以这里只要刷新就一定满足。
     ///
     /// **凡是"一次性把一批数据灌进图表"的地方都要调**：加载 CSV、
-    /// 重画某一项的曲线。实时逐拍采集那条路不用调（下一拍还会来，
-    /// 而且收尾补点本身就在末尾）。
+    /// 重画某一项的曲线。实时逐拍采集那条路不用调（定时器会刷）。
     void finishSamples();
 
     /// 在横坐标 x 处画一条**贯穿纵轴范围的黄色竖线**，用来标记"数据校验失败"的位置。
@@ -132,9 +171,9 @@ public:
     int  verifyMarkerCount() const;
 
     int    sampleCount() const { return m_history.size(); }
-    /// 折线序列里实际画了多少个点（抽稀后约为采样数的 1/step）。
+    /// 折线序列里实际画了多少个点（高密度=全部，低密度=抽稀后）。
     int    linePointCount() const;
-    /// 散点序列里的点数（不受抽稀影响）。
+    /// 散点序列里的点数（同样受密度档约束）。
     int    scatterPointCount() const;
     double lastX() const { return m_lastX; }
     double firstX() const;
@@ -153,11 +192,13 @@ private:
         bool   hasWrite = false;
     };
 
+    /// 把"攒着"的刷新排上队。重复调用只会保留一个待执行的刷新 ——
+    /// 一次性灌一批数据时，整个循环只会在末尾触发一次真正的重建。
+    void scheduleRefresh();
+
     void updateYAxis();
     /// 按当前纵轴范围和坐标区把标记线竖直拉满（坐标区变化时要重算）。
     void refreshVerifyMarkers();
-    /// 按当前步长（重新）生成折线序列；散点序列始终是全部点。
-    void rebuildLineSeries();
 
     QChart              *m_chart        = nullptr;
     VerifyBandChartView *m_view         = nullptr;
@@ -171,17 +212,17 @@ private:
     QVector<double>      m_markerXs;
 
     QVector<Sample> m_history;
+    /// 批量刷新的定时器（单次触发）。攒点的代价是刷新有一点点延迟，
+    /// 换来的是"动序列的次数"从 N 降到"每次刷新一次"。
+    QTimer         *m_plotTimer = nullptr;
     PlotStyle m_style     = PlotStyle::Line;
-    int       m_lineStep  = 1;
+    Density   m_density   = Density::High;
+    /// 上一次用的目标点数：坐标区变化时只有它真的变了才值得重画。
+    mutable int m_lastTarget = 0;
     /// 最多画多少条色带。超出的不再收。
     /// 定得比"逐处明细上限"宽，免得这里先截断、把结果文件里有的位置漏掉；
     /// 屏幕上真正画出来多少由渲染时的像素级合并决定（见 paintEvent）。
     static constexpr int kMaxVerifyMarkers = 2000;
-    /// 每个方向**累计收到过**多少个采样点（不管有没有被抽稀保留）。
-    /// 抽稀判定必须用它，不能用"已保留的点数"——那样计数器只在保留时前进，
-    /// 会出现保留一次之后再也追不上步长的死循环。
-    int       m_readSeen  = 0;
-    int       m_writeSeen = 0;
     bool      m_showRead  = true;
     bool      m_showWrite = true;
     double    m_maxY      = 1.0;

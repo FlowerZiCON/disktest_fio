@@ -72,11 +72,13 @@ inline const QString kVolumeWhyNoPhysicalDisk = QStringLiteral("没有对应的�
 inline const QString kVolumeWhyNoRoot         = QStringLiteral("没有根目录或类型未知");
 inline const QString kDiskSystemTag           = QStringLiteral("[系统盘]");
 inline const QString kDiskVirtualTag          = QStringLiteral("[虚拟设备]");
-/// 文件系统那一行的主文本：设备名、文件系统、挂载点
+/// 文件系统那一行的主文本：设备名、文件系统、挂载点。**给自检报告用** ——
+/// 报告是纯文本，不缺宽度，多写几个字段方便和 lsblk / 磁盘管理对照。
+/// 列表里那一行只用文件系统本身，见 FileSystemEntry::fsLine()。
 inline const QString kFsRowLine               = QStringLiteral("%1  %2  %3");
 inline const QString kGroupTargetDrive        = QStringLiteral("选择磁盘");
-inline const QString kColDeviceTree           = QStringLiteral("磁盘 / 分区");
-inline const QString kColTargetDir            = QStringLiteral("可测目录 / 说明");
+inline const QString kColDeviceTree           = QStringLiteral("磁盘");
+inline const QString kColTargetDir            = QStringLiteral("分区");
 inline const QString kColUsage                = QStringLiteral("使用量");
 inline const QString kColUsedTotal            = QStringLiteral("已用 / 总空间");
 inline const QString kDriveHintClick          = QStringLiteral("展开磁盘，选中要测的分区");
@@ -222,12 +224,12 @@ inline const QString kLabelDensity   = QStringLiteral("密度：");
 inline const QString kDensityHigh    = QStringLiteral("高密度");
 inline const QString kDensityLow     = QStringLiteral("低密度");
 inline const QString kDensityLowTip  =
-    QStringLiteral("折线图按数据量自动抽稀：\n"
-                   "  < 256 GiB → 每 5 个点画 1 个\n"
-                   "  256 GiB ~ 1 TiB → 每 15 个点画 1 个\n"
-                   "  ≥ 1 TiB → 每 30 个点画 1 个\n"
-                   "散点图和保存的 CSV 始终是全量数据。");
-inline const QString kDensityHighTip = QStringLiteral("折线图绘制全部采样点");
+    QStringLiteral("低密度：按屏幕能分辨的点数抽稀（约 2 点/坐标区像素列，夹在 1000~8000）\n"
+                   "折线用 LTTB 选点，会保住突然的掉速；散点等间隔取点。\n"
+                   "保存的 CSV 与报告始终是全量数据，不受这里影响。");
+inline const QString kDensityHighTip =
+    QStringLiteral("高密度：每个采样点都画（最忠实，点数越多越吃绘制）。\n"
+                   "点数特别多时切到低密度会顺滑很多。");
 inline const QString kSeriesRead     = QStringLiteral("读取速度");
 inline const QString kSeriesWrite    = QStringLiteral("写入速度");
 inline const QString kAxisCapacity   = QStringLiteral("容量（GiB）");
@@ -486,15 +488,13 @@ inline const QString kSelfTestBegin          = QStringLiteral("[自检] 开始�
 inline const QString kSelfTestPlanLine       = QStringLiteral("    剩余 %1 → %2 个 × %3 = %4  %5");
 inline const QString kSelfTestViolation      = QStringLiteral("*** 违规 ***");
 inline const QString kSelfTestPlanInvalid    = QStringLiteral("    剩余 %1 → 计划无效（空间不足）");
-inline const QString kSelfTestStepLine       = QStringLiteral("    %1 → 每 %2 个点画 1 个  %3");
+inline const QString kSelfTestStepLine       = QStringLiteral("    %1  %2");
 inline const QString kPhaseNameWrite         = QStringLiteral("写入");
 inline const QString kPhaseNameRead          = QStringLiteral("读取");
 inline const QString kTextNone               = QStringLiteral("无");
 inline const QString kTextNotObserved        = QStringLiteral("(没观察到)");
 
 // ── 自检报告正文 ──
-inline const QString kReportStepProbe256GiB  = QStringLiteral("256 GiB（下边界）");
-inline const QString kReportStepProbe1TiB    = QStringLiteral("1 TiB（下边界）");
 inline const QString kReportTitle            = QStringLiteral("==================== 硬盘可靠性测试工具 自检报告 ====================\n");
 inline const QString kReportQtVersion        = QStringLiteral("Qt 版本            : ");
 inline const QString kReportQpaPlatform      = QStringLiteral("QPA 平台插件        : ");
@@ -550,7 +550,7 @@ inline const QString kReportStateObserved    = QStringLiteral("   运行期间�
 inline const QString kReportGuardRawDevice   = QStringLiteral("裸设备路径拦截      : ");
 inline const QString kReportGuardSyncEngine  = QStringLiteral("同步引擎分类        : ");
 inline const QString kReportGuardWindowIcon  = QStringLiteral("窗口图标            : ");
-inline const QString kReportGuardAutoStep    = QStringLiteral("折线抽稀步长（自动分档）: ");
+inline const QString kReportGuardAutoStep    = QStringLiteral("抽稀（LTTB 保尖峰）: ");
 inline const QString kReportGuardExclusive   = QStringLiteral("单选互斥（绘图方式/密度）: ");
 inline const QString kReportExclusiveNote    = QStringLiteral("（任何时刻恰好一个被选中）\n");
 inline const QString kReportGuardFilePlan    = QStringLiteral("文件规划（每个 ≤2GiB）: ");
@@ -596,7 +596,7 @@ inline const QString kClMode         = QStringLiteral("自检用的读写模式�
 inline const QString kClStopAfter    = QStringLiteral("自检时在第 N 秒触发一次「停止」，验证停止路径");
 inline const QString kClScatter      = QStringLiteral("自检时把绘图方式切到散点图（默认折线图）");
 inline const QString kClReadOnly     = QStringLiteral("自检时只跑读取阶段（验证「有文件才能只读」）");
-inline const QString kClLowDensity   = QStringLiteral("自检时把折线图切到低密度（按数据量自动抽稀）");
+inline const QString kClLowDensity   = QStringLiteral("自检时把折线图切到低密度（按屏幕像素抽稀）");
 inline const QString kClSaveData     = QStringLiteral("自检跑完后把测试数据保存到这个 CSV");
 inline const QString kClLoadData     = QStringLiteral("自检直接加载这个 CSV 画图并出报告，不跑测试");
 
