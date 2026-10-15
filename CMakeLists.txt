@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(disktest
-    VERSION 3.0.4
+    VERSION 3.0.5
     DESCRIPTION "Qt + fio disk reliability tester GUI (file mode only)"
     LANGUAGES CXX)
 
