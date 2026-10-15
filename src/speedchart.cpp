@@ -341,12 +341,18 @@ void SpeedChart::setDensity(Density density)
 
 int SpeedChart::targetPointCount() const
 {
-    // 坐标区的像素宽 ≈ 这里能分辨的列数。一条折线每列 2 个点才看得出是"线"。
+    // 坐标区的像素宽 ≈ 这里能分辨的列数。
     int px = int(m_chart ? m_chart->plotArea().width() : 0);
     if (px <= 0 && m_view)
         px = m_view->viewport()->width();
-    // 上下限：小窗口别抽得太狠（1000），4K 宽也别让点数无限涨（8000）
-    return qBound(1000, px * 2, 8000);
+    // 低密度是"明显更省"的那一档：**每 2 个像素列画 1 个点**。
+    //
+    // 这里最初写的是"每列 2 个点"。那个目标是"抽稀之后和高密度看起来一模一样"——
+    // 实测 924px 的绘图区会留 1848 点/条（高密度是 8214 点），两条曲线肉眼分不出来，
+    // 绘制也只从 20.8ms 降到 14.6ms：**档位在，但等于没起作用**。
+    // 改成每 2 列 1 个点后点数掉到约 1/4，曲线明显更简、也真的更流畅；
+    // 折线是 LTTB 选点，大起伏仍然保得住（要看每一个点就切回高密度）。
+    return qBound(200, px / 2, 2000);
 }
 
 QList<QPointF> SpeedChart::reduceEvenly(const QList<QPointF> &src, int target)

@@ -33,8 +33,32 @@
 #define DISKTEST_BUILD_DATE __DATE__
 #define DISKTEST_BUILD_TIME __TIME__
 
+// 这份二进制是给哪个平台编的。显示在"关于"里的版本号后面 ——
+// 现在同时会有 Windows / Linux-amd64 / Linux-arm64 几种包，
+// 报问题、或者对着 release 页挑包的时候，一眼就能看出手上这份是什么。
+//
+// 用**编译期**宏而不是 QSysInfo 的运行时值：这里要回答的是"我这个包是什么"，
+// 不是"CPU 现在跑在什么模式"。32 位包跑在 64 位系统上、x64 包跑在
+// ARM Windows 的模拟层里，运行时值都会和实际的包对不上。
+#if defined(Q_OS_WIN) && defined(Q_PROCESSOR_ARM_64)
+#  define DISKTEST_ARCH "win-arm64"
+#elif defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
+#  define DISKTEST_ARCH "win64"
+#elif defined(Q_OS_WIN)
+#  define DISKTEST_ARCH "win32"
+#elif defined(Q_OS_LINUX) && defined(Q_PROCESSOR_ARM_64)
+#  define DISKTEST_ARCH "Linux-arm64"
+#elif defined(Q_OS_LINUX) && defined(Q_PROCESSOR_X86_64)
+#  define DISKTEST_ARCH "Linux-amd64"
+#elif defined(Q_OS_LINUX)
+#  define DISKTEST_ARCH "Linux-i386"
+#else
+#  define DISKTEST_ARCH "unknown"
+#endif
+
 inline const QString kAppName    = QStringLiteral("磁盘测试By MOONLIGHT");
 inline const QString kAppVersion = QStringLiteral(DISKTEST_VERSION);
+inline const QString kAppArch    = QStringLiteral(DISKTEST_ARCH);
 inline const QString kBuildTime  = QStringLiteral(DISKTEST_BUILD_DATE " " DISKTEST_BUILD_TIME);
 
 /// —— 下面三项请改成你自己的信息 ——
@@ -224,12 +248,12 @@ inline const QString kLabelDensity   = QStringLiteral("密度：");
 inline const QString kDensityHigh    = QStringLiteral("高密度");
 inline const QString kDensityLow     = QStringLiteral("低密度");
 inline const QString kDensityLowTip  =
-    QStringLiteral("低密度：按屏幕能分辨的点数抽稀（约 2 点/坐标区像素列，夹在 1000~8000）\n"
-                   "折线用 LTTB 选点，会保住突然的掉速；散点等间隔取点。\n"
+    QStringLiteral("低密度：每 2 个像素列画 1 个点（约 200~2000 点），曲线明显更简、也更流畅。\n"
+                   "折线用 LTTB 选点，大的起伏仍然保得住；要看每一个点请切回高密度。\n"
                    "保存的 CSV 与报告始终是全量数据，不受这里影响。");
 inline const QString kDensityHighTip =
     QStringLiteral("高密度：每个采样点都画（最忠实，点数越多越吃绘制）。\n"
-                   "点数特别多时切到低密度会顺滑很多。");
+                   "点数特别多、界面发涩时，切到低密度会顺滑很多。");
 inline const QString kSeriesRead     = QStringLiteral("读取速度");
 inline const QString kSeriesWrite    = QStringLiteral("写入速度");
 inline const QString kAxisCapacity   = QStringLiteral("容量（GiB）");
@@ -285,7 +309,7 @@ inline const QString kFilterTextLog           = QStringLiteral("文本文件 (*.
 inline const QString kAboutHtml               =
     QStringLiteral("<h3>%1</h3>"
                    "<table cellspacing='0' cellpadding='3'>"
-                   "<tr><td><b>版本</b></td><td>%2</td></tr>"
+                   "<tr><td><b>版本</b></td><td>%2　（%10）</td></tr>"
                    "<tr><td><b>作者</b></td><td>%3</td></tr>"
                    "<tr><td><b>联系作者</b></td><td>%4</td></tr>"
                    "<tr><td><b>编译时间</b></td><td>%5</td></tr>"
@@ -313,6 +337,10 @@ inline const QString kAboutHtml               =
                    "<p>完整许可条款随程序一起分发，见程序目录的 <code>licenses</code> 子目录："
                    "<code>fio-COPYING.txt</code>（fio）、<code>Qt-LGPLv3.txt</code>（Qt）。</p>");
 inline const QString kDlgAboutTitle           = QStringLiteral("关于");
+/// "关于"里的"检查更新"按钮：点了就用系统浏览器打开 release 页
+inline const QString kBtnCheckUpdate          = QStringLiteral("检查更新");
+inline const QString kReleasesLatestUrl       =
+    QStringLiteral("https://github.com/FlowerZiCON/disktest_fio/releases/latest");
 inline const QString kTextNoneInParens        = QStringLiteral("(无)");
 inline const QString kMsgPhaseProblem         = QStringLiteral("%1 发现异常");
 inline const QString kMsgTestStoppedSuffix    = QStringLiteral("\n\n测试已停止。");

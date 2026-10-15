@@ -20,6 +20,7 @@
 QT_BEGIN_NAMESPACE
 class QVBoxLayout;
 class QLabel;
+class QRadioButton;
 QT_END_NAMESPACE
 
 class SpeedChart;
@@ -51,6 +52,10 @@ private:
     explicit ResultWindow(const RunData &data, QWidget *parent = nullptr);
 
     void rebuildReliabilityChart();
+    /// 图表上方的「绘图方式 / 密度」一行。和主界面同一套控件 ——
+    /// 主界面能切的东西，回看窗口也应该能切，否则同一份数据在两个地方
+    /// 的"可看性"不一样（尤其是几千点的高密度数据）。
+    void buildChartStyleRow(QVBoxLayout *root);
     void buildPerfTable(QVBoxLayout *root);
     /// 只画某一项的读写两条线（颜色按测试项：顺序项红/蓝，随机项黄/绿）。
     void rebuildPerfChart(int item);
@@ -65,6 +70,10 @@ private:
     QVector<RunData::Trace> m_traces;
     SpeedChart *m_chart     = nullptr;
     QLabel     *m_hintLabel = nullptr;
+    QRadioButton *m_lineRadio = nullptr;
+    QRadioButton *m_scatterRadio = nullptr;
+    QRadioButton *m_densityHighRadio = nullptr;
+    QRadioButton *m_densityLowRadio = nullptr;
     /// 性能数据：当前单独显示的测试项下标（-1 = 合起来的曲线）。
     int m_selectedItem = -1;
     /// 结果表里的大号数字格子（每项：读取、写入）。

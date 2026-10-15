@@ -17,6 +17,7 @@
 #include "speedchart.h"
 #include "uitext.h"
 
+#include <QButtonGroup>
 #include <QColor>
 #include <QDir>
 #include <QFileInfo>
@@ -28,6 +29,7 @@
 #include <QMessageBox>
 #include <QPair>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QVBoxLayout>
 #include <QVector>
 
@@ -210,7 +212,11 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     }
 
     // ---- 图表 ----
+    // 顺序要紧：buildChartStyleRow() 里要把初始值写进 m_chart，
+    // 所以必须**先建图表**再建那一行；但加进布局的顺序反过来，
+    // 那一行才会显示在图表上方。
     m_chart = new SpeedChart(this);
+    buildChartStyleRow(root);
     root->addWidget(m_chart, 1);
 
     if (perf)
@@ -276,6 +282,65 @@ void ResultWindow::rebuildReliabilityChart()
     // 末点必须画出来：抽稀按"第几个点"算，末点不是 step 的整数倍时会被抽掉，
     // 曲线末端就够不到横轴右边缘（实测：最后一点缺失）。
     m_chart->finishSamples();
+}
+
+void ResultWindow::buildChartStyleRow(QVBoxLayout *root)
+{
+    auto *row = new QHBoxLayout;
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+
+    auto *styleLabel = new QLabel(kLabelPlotStyle, this);
+    m_lineRadio = new QRadioButton(kPlotLine, this);
+    m_scatterRadio = new QRadioButton(kPlotScatter, this);
+    // 显式互斥组：不依赖"同一个父窗口"这条隐式规则
+    auto *styleGroup = new QButtonGroup(this);
+    styleGroup->setExclusive(true);
+    styleGroup->addButton(m_lineRadio);
+    styleGroup->addButton(m_scatterRadio);
+
+    auto *densityLabel = new QLabel(kLabelDensity, this);
+    m_densityHighRadio = new QRadioButton(kDensityHigh, this);
+    m_densityLowRadio = new QRadioButton(kDensityLow, this);
+    m_densityHighRadio->setToolTip(kDensityHighTip);
+    m_densityLowRadio->setToolTip(kDensityLowTip);
+    auto *densityGroup = new QButtonGroup(this);
+    densityGroup->setExclusive(true);
+    densityGroup->addButton(m_densityHighRadio);
+    densityGroup->addButton(m_densityLowRadio);
+
+    // 初始值：绘图方式取自文件（老文件没记就是折线图）；
+    // 密度取自文件，老文件只有 line_step 时按"当年抽过稀 → 低密度"。
+    const QString style = m_data.param(QStringLiteral("plot_style"));
+    (style == QLatin1String("scatter") ? m_scatterRadio : m_lineRadio)->setChecked(true);
+    (lowDensityFor(m_data) ? m_densityLowRadio : m_densityHighRadio)->setChecked(true);
+    m_chart->setPlotStyle(style == QLatin1String("scatter") ? SpeedChart::PlotStyle::Scatter
+                                                            : SpeedChart::PlotStyle::Line);
+    m_chart->setDensity(lowDensityFor(m_data) ? SpeedChart::Density::Low
+                                              : SpeedChart::Density::High);
+
+    const auto applyStyle = [this]() {
+        m_chart->setPlotStyle(m_lineRadio->isChecked() ? SpeedChart::PlotStyle::Line
+                                                       : SpeedChart::PlotStyle::Scatter);
+    };
+    const auto applyDensity = [this]() {
+        m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                           : SpeedChart::Density::High);
+    };
+    connect(m_lineRadio, &QRadioButton::toggled, this, applyStyle);
+    connect(m_scatterRadio, &QRadioButton::toggled, this, applyStyle);
+    connect(m_densityHighRadio, &QRadioButton::toggled, this, applyDensity);
+    connect(m_densityLowRadio, &QRadioButton::toggled, this, applyDensity);
+
+    row->addWidget(styleLabel);
+    row->addWidget(m_lineRadio);
+    row->addWidget(m_scatterRadio);
+    row->addSpacing(12);
+    row->addWidget(densityLabel);
+    row->addWidget(m_densityHighRadio);
+    row->addWidget(m_densityLowRadio);
+    row->addStretch(1);
+    root->addLayout(row);
 }
 
 void ResultWindow::buildPerfTable(QVBoxLayout *root)
@@ -357,8 +422,10 @@ void ResultWindow::rebuildPerfChart(int item)
 
     m_chart->clear();
     m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    // 性能项每趟才 20 来个点，抽稀没有意义 —— 固定高密度全画
-    m_chart->setDensity(SpeedChart::Density::High);
+    // 性能项每趟才 20 来个点，抽稀本来没意义；但**跟随用户选的那一档**，
+    // 免得图上按高密度画、上面的单选却停在低密度，两边对不上。
+    m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                       : SpeedChart::Density::High);
     m_chart->setDirections(!trace.read.isEmpty(), !trace.write.isEmpty());
 
     const int count = qMax(trace.read.size(), trace.write.size());
@@ -387,7 +454,8 @@ void ResultWindow::rebuildPerfCombinedChart()
     m_selectedItem = -1;
     m_chart->clear();
     m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    m_chart->setDensity(SpeedChart::Density::High);   // 性能项点很少，全画
+    m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                       : SpeedChart::Density::High);
     m_chart->setDirections(true, true);
     for (int i = 0; i < m_data.sampleCount(); ++i) {
         const quint8 f = m_data.flags.value(i, 0);

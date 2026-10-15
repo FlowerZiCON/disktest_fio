@@ -976,9 +976,11 @@ void MainWindow::onPlotStyleChanged()
     if (!m_chart)
         return;
     const bool lineMode = m_lineRadio->isChecked();
-    // 密度只对折线图有意义，选散点图时整组隐藏（值保留，切回来还在）
+    // 密度这一组**始终显示**：它现在同时作用于折线和散点两条序列
+    // （散点标记超过一两千个就完全重叠了，抽稀能省下可观的绘制）。
+    // 以前"只在折线图下出现"是当时的实现决定的，改抽稀逻辑之后那个前提不成立了。
     if (m_densityBox)
-        m_densityBox->setVisible(lineMode);
+        m_densityBox->setVisible(true);
     m_chart->setPlotStyle(lineMode ? SpeedChart::PlotStyle::Line
                                    : SpeedChart::PlotStyle::Scatter);
 }
@@ -2120,13 +2122,25 @@ void MainWindow::onSaveDiagnostics()
 
 void MainWindow::onAbout()
 {
-    QMessageBox::about(this, kDlgAboutTitle,
-        kAboutHtml
-            .arg(kAppName, kAppVersion, kAuthor, kContact, kBuildTime,
-                 QString::fromLatin1(qVersion()),
-                 isProcessElevated() ? kModeElevated
-                                     : kModeNormal,
-                 FioConfig::folderName(), FioConfig::fileBaseName()));
+    // 用实例而不是 QMessageBox::about()：后者是静态函数，加不了自定义按钮。
+    QMessageBox box(this);
+    box.setWindowTitle(kDlgAboutTitle);
+    box.setIcon(QMessageBox::Information);
+    box.setTextFormat(Qt::RichText);
+    box.setText(kAboutHtml
+                    .arg(kAppName, kAppVersion, kAuthor, kContact, kBuildTime,
+                         QString::fromLatin1(qVersion()),
+                         isProcessElevated() ? kModeElevated : kModeNormal,
+                         FioConfig::folderName(), FioConfig::fileBaseName(),
+                         kAppArch));
+    QPushButton *update = box.addButton(kBtnCheckUpdate, QMessageBox::ActionRole);
+    box.addButton(kBtnClose, QMessageBox::RejectRole);
+    box.exec();
+    if (box.clickedButton() == update) {
+        // 交给系统浏览器：程序里不联网、不解析 HTML、不处理重定向，
+        // 也不去猜"有没有新版本"——那需要读 GitHub API，还会引入网络依赖。
+        QDesktopServices::openUrl(QUrl(kReleasesLatestUrl));
+    }
 }
 
 void MainWindow::onClearChart()
