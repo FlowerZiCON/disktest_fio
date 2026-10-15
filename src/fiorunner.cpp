@@ -21,8 +21,10 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUuid>
 
 namespace {
 
@@ -60,90 +62,38 @@ bool parseSpeedValue(const QString &text, double *valueOut)
     return true;
 }
 
-/// 解析一行 ETA。形如：
+/// 从一行 ETA 里取出**作业状态字符**（r / w / m / f ...）。
+///
+/// 形如：
 ///   Jobs: 1 (f=1): [m(1)][13.6%][r=811MiB/s,w=350MiB/s][r=208k,w=89.6k IOPS][eta 00m:19s]
-/// 返回 true 表示这一行里确实带了速率。
-bool parseEtaLine(const QString &line, EtaSample *sample)
+/// 状态在那一段 `[x(n)]` 里，`f` 表示所有作业都已经结束。
+///
+/// **只取状态**。这一行里的速率 / 百分比 / eta 文本一个都不参与计算：
+/// 实时速率来自进程 I/O 计数器（见 emitSample），分辨率 0.5 s，比 fio 1 Hz 的
+/// ETA 输出细，也没有"前 3 秒不输出"的空窗期。以前这里顺手把它们都解析出来
+/// 存进一个结构体，而那些字段**一个读者都没有** —— 每次采样都在白跑正则。
+/// 将来真要改用 ETA 速率，从这里取即可。
+bool parseEtaState(const QString &line, QString *state)
 {
     static const QRegularExpression jobsRe(
-        QStringLiteral(R"(^Jobs:\s*(\d+)\s*\(f=(\d+)\)\s*:?\s*(.*)$)"));
+        QStringLiteral(R"(^Jobs:\s*\d+\s*\(f=\d+\)\s*:?\s*(.*)$)"));
     static const QRegularExpression bracketRe(QStringLiteral(R"(\[([^\]]*)\])"));
     static const QRegularExpression stateRe(QStringLiteral(R"(^([A-Za-z])\((\d+)\)$)"));
-    static const QRegularExpression iopsRe(QStringLiteral(R"(IOPS)"),
-                                           QRegularExpression::CaseInsensitiveOption);
 
     const QRegularExpressionMatch jobsMatch = jobsRe.match(line);
     if (!jobsMatch.hasMatch())
         return false;
 
-    sample->running = jobsMatch.captured(1).toInt();
-    const QString tail = jobsMatch.captured(3);
-
-    bool sawSpeed = false;
-    QRegularExpressionMatchIterator it = bracketRe.globalMatch(tail);
+    QRegularExpressionMatchIterator it = bracketRe.globalMatch(jobsMatch.captured(1));
     while (it.hasNext()) {
-        const QString content = it.next().captured(1).trimmed();
-        if (content.isEmpty())
+        const QRegularExpressionMatch stateMatch = stateRe.match(it.next().captured(1).trimmed());
+        if (!stateMatch.hasMatch())
             continue;
-
-        if (content.endsWith(QLatin1Char('%'))) {
-            bool ok = false;
-            const double percent = content.left(content.size() - 1).toDouble(&ok);
-            sample->percent = ok ? percent : -1.0;
-            continue;
-        }
-
-        if (content.startsWith(QLatin1String("eta"), Qt::CaseInsensitive)) {
-            sample->etaText = content.mid(3).trimmed();
-            continue;
-        }
-
-        const QRegularExpressionMatch stateMatch = stateRe.match(content);
-        if (stateMatch.hasMatch()) {
-            sample->state = stateMatch.captured(1);
-            continue;
-        }
-
-        if (!content.contains(QLatin1Char('=')))
-            continue;
-
-        const bool isIops = iopsRe.match(content).hasMatch();
-        QString body = content;
-        if (isIops)
-            body = content.left(content.lastIndexOf(QLatin1String("IOPS"), -1,
-                                                       Qt::CaseInsensitive)).trimmed();
-
-        const QStringList parts = body.split(QLatin1Char(','), Qt::SkipEmptyParts);
-        for (const QString &part : parts) {
-            const int eq = part.indexOf(QLatin1Char('='));
-            if (eq <= 0)
-                continue;
-            const QChar key = part.at(0);
-            double value = 0.0;
-            if (!parseSpeedValue(part.mid(eq + 1), &value))
-                continue;
-
-            if (key == QLatin1Char('r')) {
-                if (isIops) {
-                    sample->readIops = value;
-                } else {
-                    sample->readMiBs = value / (1024.0 * 1024.0);
-                    sample->hasRead = true;
-                    sawSpeed = true;
-                }
-            } else if (key == QLatin1Char('w')) {
-                if (isIops) {
-                    sample->writeIops = value;
-                } else {
-                    sample->writeMiBs = value / (1024.0 * 1024.0);
-                    sample->hasWrite = true;
-                    sawSpeed = true;
-                }
-            }
-        }
+        if (state)
+            *state = stateMatch.captured(1);
+        return true;
     }
-
-    return sawSpeed;
+    return false;
 }
 
 struct ProblemPattern
@@ -164,7 +114,13 @@ const ProblemPattern kProblemPatterns[] = {
     { "job global dropped",  kProblemJobGlobalDropped },
     { "cannot open",         kProblemCannotOpen },
     { "bad magic header",    kProblemBadMagicHeader },
+    // 校验失败的**两种措辞都要登记**：fio 3.x 长格式是 "crc32c: verify failed at ..."，
+    // 短格式是 "Verify error at file ..., offset ..."。scanForVerifyFailures 两种都认
+    // （那才是坏块计数的来源），这里只登记一种的话，短格式那条路的结果是：
+    // 计数 > 0 但 warnings 是空的 —— 而结论判定又要看 warnings，于是"盘坏了"
+    // 会被同一份汇总判成"合格"。两处口径必须一致。
     { "verify failed",       kProblemVerifyFailed },
+    { "verify error",        kProblemVerifyFailed },
     { "illegal byte sequence", kProblemIllegalByteSequence },
 };
 
@@ -215,17 +171,28 @@ static void parseVerifyPosition(const QString &line, int *fileIndex, qint64 *off
         *offset = value;
 }
 
+bool FioResult::hasProblems() const
+{
+    // 校验失败必须算"有问题"。它不是"可疑日志"，而是**确凿的坏数据**：
+    // 以前这里漏了它，而 isClean() 又是汇总结论的唯一依据 —— 只要 fio 用的是
+    // 短措辞（"Verify error at ..."）而且没给 err=N，一块真坏了的盘就会被
+    // 判成"合格"，同时屏幕上还挂着"发现 N 处不一致"的大红告警。
+    if (verifyFailures > 0 || !firstVerifyError.isEmpty())
+        return true;
+    if (!warnings.isEmpty())
+        return true;
+    for (int err : jobErrors) {
+        if (err != 0)
+            return true;
+    }
+    return false;
+}
+
 bool FioResult::isClean() const
 {
     if (exitCode != 0 || cancelled)
         return false;
-    if (!warnings.isEmpty())
-        return false;
-    for (int err : jobErrors) {
-        if (err != 0)
-            return false;
-    }
-    return true;
+    return !hasProblems();
 }
 
 FioRunner::FioRunner(QObject *parent)
@@ -253,6 +220,7 @@ FioRunner::~FioRunner()
         m_process->kill();
         m_process->waitForFinished(3000);
     }
+    removeJobFile();
     delete m_ioCounter;
     m_ioCounter = nullptr;
 }
@@ -272,16 +240,51 @@ QString FioRunner::writeJobFile(const QString &text, const QString &name, QStrin
     }
     QDir().mkpath(dir);
 
-    const QString path = QDir(dir).absoluteFilePath(name);
+    // 文件名必须**不可预测、且独占创建**。
+    //
+    // 原来是 `<临时目录>/ml_disktest-write.fio` 这种固定名字 + WriteOnly|Truncate。
+    // 临时目录是全局可写的，别的本地用户可以先摆一个同名符号链接，本程序
+    // （设计上允许提权运行）一打开就顺着链接把**任意文件**截断成 job 内容。
+    // 现在：名字带随机串（猜不到）+ NewOnly（Unix 上是 O_CREAT|O_EXCL，
+    // 已存在直接失败，**不会跟随符号链接**），写完还要核对字节数。
+    //
+    // 文件用完由 removeJobFile() 删掉，不在临时目录里留东西。
+    const QString base = QFileInfo(name).completeBaseName();
+    const QString unique = QStringLiteral("%1-%2.fio")
+                               .arg(base.isEmpty() ? QStringLiteral("ml_disktest") : base,
+                                    QUuid::createUuid().toString(QUuid::WithoutBraces));
+    const QString path = QDir(dir).absoluteFilePath(unique);
+
+    const QByteArray payload = text.toUtf8();
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
         if (error)
             *error = kErrWriteJobFile.arg(path, file.errorString());
         return QString();
     }
-    file.write(text.toUtf8());
+    const qint64 written = file.write(payload);
+    const bool flushed = file.flush();
+    // errorString() 要在 close() 之前取，关掉之后它会被重置
+    const QString writeError = file.errorString();
     file.close();
+
+    // 写失败 / 写了一半也报成功的话，fio 会在一个空 job 文件上报
+    // "Bad option" 之类的错，和真正的原因（临时目录满了）完全对不上。
+    if (written != payload.size() || !flushed) {
+        QFile::remove(path);
+        if (error)
+            *error = kErrWriteJobFile.arg(path, writeError);
+        return QString();
+    }
     return path;
+}
+
+void FioRunner::removeJobFile()
+{
+    if (m_jobFilePath.isEmpty())
+        return;
+    QFile::remove(m_jobFilePath);
+    m_jobFilePath.clear();
 }
 
 QString FioRunner::queryVersion(const QString &fioPath, int timeoutMs)
@@ -329,12 +332,20 @@ QStringList FioRunner::queryEngines(const QString &fioPath, int timeoutMs)
     static const QRegularExpression tokenRe(QStringLiteral("[A-Za-z0-9_]+"));
     const QString out = QString::fromLocal8Bit(probe.readAll());
 
-    QStringList found;
+    QSet<QString> present;
     QRegularExpressionMatchIterator it = tokenRe.globalMatch(out);
-    while (it.hasNext()) {
-        const QString token = it.next().captured(0).toLower();
-        if (FioConfig::candidateIoEngines().contains(token) && !found.contains(token))
-            found << token;
+    while (it.hasNext())
+        present.insert(it.next().captured(0).toLower());
+
+    // **按 candidateIoEngines() 的优先级返回，不是按 fio 打印的顺序。**
+    // 调用方直接取 first() 当"选中的引擎"，而 `fio --enghelp` 的排列顺序是实现细节
+    // （实测 3.43 是 windowsaio → psync，恰好等于我们想要的默认值，所以这个 bug
+    // 一直没暴露）。一旦某个版本把低优先级的候选排在前面就会被选中：
+    // Windows 上选到 psync 再配 direct=1 是最糟的组合。顺序在这里钉死。
+    QStringList found;
+    for (const QString &candidate : FioConfig::candidateIoEngines()) {
+        if (present.contains(candidate))
+            found << candidate;
     }
     return found;
 }
@@ -355,6 +366,10 @@ bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,
 
     resetForRun(kind);
     m_workingDir = workingDir;
+    // 上一轮的 job 文件先删掉：正常跑完时 onProcessFinished 已经删过了，
+    // 这里兜住"启动失败就返回"那条路，别在临时目录里越积越多。
+    removeJobFile();
+    m_jobFilePath = jobFilePath;
     m_running = true;
 
     m_process->setWorkingDirectory(workingDir);
@@ -365,11 +380,11 @@ bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,
     emit logText(QStringLiteral("> \"%1\" %2").arg(m_fioPath, args.join(QLatin1Char(' '))));
     emit logText(kFioWorkingDir.arg(workingDir));
 
-    m_launchError.clear();
     m_process->start(m_fioPath, args);
     if (!m_process->waitForStarted(15000)) {
         const QString msg = kErrFioStartFailed.arg(m_process->errorString());
         m_running = false;
+        removeJobFile();
         if (error)
             *error = msg;
         return false;
@@ -403,7 +418,6 @@ void FioRunner::resetForRun(JobKind kind)
 {
     m_stdoutBuffer.clear();
     m_stdoutAll.clear();
-    m_stderrAll.clear();
     m_warningHits.clear();
     m_warningOrder.clear();
     m_verifyFailures = 0;
@@ -413,7 +427,6 @@ void FioRunner::resetForRun(JobKind kind)
     m_verifyFileIndexes.clear();
     m_result = FioResult();
     m_result.kind = kind;
-    m_kind = kind;
     m_stoppedByUser = false;
     m_testFinished = false;
     m_prevRead = 0;
@@ -511,37 +524,50 @@ void FioRunner::onStderrReady()
     if (text.isEmpty())
         return;
 
-    m_stderrAll += text;
-    if (m_stderrAll.size() > kMaxCapturedChars)
-        m_stderrAll.remove(0, m_stderrAll.size() - kMaxCapturedChars);
-
     scanForProblems(text);
     scanForVerifyFailures(text);
     emit logText(QStringLiteral("[stderr] %1").arg(text.trimmed()));
 }
 
-void FioRunner::consumeStdout()
+/// 把缓冲区里**已经完整**的行切出来，返回它们，并把这些字节从缓冲区里摘掉。
+///
+/// 关键：调用方拿到列表之后**在循环外**再逐条处理 / 发信号，绝不能边遍历缓冲区
+/// 边发信号。三个信号（logText / warningRaised / verifyFailureRaised）都是直连到
+/// 主窗口的，将来哪个槽一旦自己转起事件循环（弹一个模态框就够），
+/// readyReadStandardOutput 就会重入这个函数：缓冲区已经被摘掉了，重入那一次
+/// 什么也切不到；可要是还留在里面，同一批行会被处理两遍（坏块数翻倍）。
+static QStringList takeCompleteLines(QByteArray *buffer)
 {
-    m_stdoutBuffer += m_process->readAllStandardOutput();
-
+    QStringList lines;
     int start = 0;
-    for (int i = 0; i < m_stdoutBuffer.size(); ++i) {
-        const char c = m_stdoutBuffer.at(i);
+    for (int i = 0; i < buffer->size(); ++i) {
+        const char c = buffer->at(i);
         if (c != '\r' && c != '\n')
             continue;
         if (i > start) {
             const QString fragment =
-                QString::fromLocal8Bit(m_stdoutBuffer.mid(start, i - start)).trimmed();
+                QString::fromLocal8Bit(buffer->mid(start, i - start)).trimmed();
             if (!fragment.isEmpty())
-                handleFragment(fragment);
+                lines << fragment;
         }
         start = i + 1;
     }
     if (start > 0)
-        m_stdoutBuffer.remove(0, start);
+        buffer->remove(0, start);
 
-    if (m_stdoutBuffer.size() > 64 * 1024)
-        m_stdoutBuffer.clear();
+    // 一整行都没有（不正常，除非 fio 输出了 64 KiB 不带换行的东西）：丢掉，
+    // 否则缓冲区会无限涨。
+    if (buffer->size() > 64 * 1024)
+        buffer->clear();
+    return lines;
+}
+
+void FioRunner::consumeStdout()
+{
+    m_stdoutBuffer += m_process->readAllStandardOutput();
+    const QStringList fragments = takeCompleteLines(&m_stdoutBuffer);
+    for (const QString &fragment : fragments)
+        handleFragment(fragment);
 }
 
 void FioRunner::handleFragment(const QString &fragment)
@@ -554,8 +580,8 @@ void FioRunner::handleFragment(const QString &fragment)
     scanForProblems(fragment);
 
     // 解析 ETA 只有一个用途：状态打成 f 就说明所有 job 都跑完了。
-    EtaSample sample;
-    if (parseEtaLine(fragment, &sample) && sample.state == QLatin1String("f"))
+    QString state;
+    if (parseEtaState(fragment, &state) && state == QLatin1String("f"))
         noteTestFinished(kFioJobEnded);
 
     if (fragment.startsWith(QLatin1String("Run status group")))
@@ -640,8 +666,10 @@ void FioRunner::scanForVerifyFailures(const QString &text)
 
 void FioRunner::onProcessErrorOccurred(int error)
 {
+    // 启动失败的原因必须报出去。以前它被塞进一个私有成员再没人读，
+    // 于是"fio 起不来"只剩 startJob 返回 false 这一条线索，原因丢了。
     if (error == QProcess::FailedToStart)
-        m_launchError = m_process->errorString();
+        emit logText(kErrFioStartFailed.arg(m_process->errorString()));
 }
 
 void FioRunner::onProcessFinished(int exitCode, QProcess::ExitStatus status)
@@ -660,6 +688,8 @@ void FioRunner::onProcessFinished(int exitCode, QProcess::ExitStatus status)
     onStderrReady();
 
     m_ioCounter->detach();
+    // fio 已经读完了 job 文件，可以删了（临时目录里不留东西）
+    removeJobFile();
 
     finalizeResult();
     m_result.exitCode = exitCode;

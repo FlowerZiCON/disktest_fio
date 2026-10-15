@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <QColor>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -63,7 +64,10 @@ public:
     static int     perfItemIodepth(PerfItem item);     ///< 8 / 1 / 32 / 1
     static bool    perfItemIsRandom(PerfItem item);
     static QString perfItemBlockSize(PerfItem item);   ///< "4m" / "4k"
-    static PerfItem perfItemFromKey(const QString &key);
+    /// 结果图里"读取 / 写入"两条线的颜色：顺序项红/蓝，随机项黄/绿。
+    /// **主窗口和结果窗口共用这一份规则** —— 同一份数据在两个窗口里画成
+    /// 两种颜色，用户会以为是两组不同的数据。颜色只按测试项分，不按读/写分。
+    static void perfItemColors(PerfItem item, QColor *readColor, QColor *writeColor);
 
     /// 性能测试每一项固定跑多少秒。
     /// 采样窗口长度：图表和统计只取这么多秒。
@@ -97,7 +101,9 @@ public:
 
     // ---- 性能测试 ----
     qint64              perfDataBytes = qint64(1024) * 1024 * 1024;   ///< 测试数据大小，默认 1 GiB
-    QVector<PerfItem>   perfItems;                   ///< 勾选要跑的测试项
+    /// 勾选要跑的测试项，下标是 PerfItem 的枚举序号。
+    /// **只有这一份"哪些项要跑"的状态**（以前旁边还挂着一个 QVector<PerfItem>
+    /// perfItems，谁都不读，却和第二份真相并存）。
     bool                perfItemChecked[4] = {true, true, true, true};
 
     /// 仅自检使用：把"写满整个分区"的目标压到这么多 MiB（0 = 不限制）。
@@ -142,7 +148,14 @@ public:
     static QStringList candidateIoEngines();
     /// 用探测结果覆盖引擎；传空串恢复成平台默认。
     static void    setIoEngine(const QString &engine);
-    static bool    directIo() { return true; }
+    /// job 里是否用直接 I/O（`direct=1`）。
+    ///
+    /// Linux 上 libaio / io_uring / posixaio / psync 都支持 O_DIRECT，恒为 true。
+    /// Windows 上只有 windowsaio 支持；探测到的引擎若是 psync / sync / vsync /
+    /// mmap 这类同步引擎，配上 direct=1 会直接报错，所以那种情况下退回缓冲 I/O，
+    /// 并由界面明确说明"这次测量包含系统缓存，数字仅供参考"。
+    /// （判据就是 engineRequiresBufferedIo —— 它以前只被自检调用，等于没有生效。）
+    static bool    directIo();
 
     bool    isSequential() const;
     QString blockSize() const;                       ///< "4m" / "4k"
@@ -152,7 +165,6 @@ public:
     QString testModeText() const;                    ///< "可靠性测试" / "性能测试"
 
     QString testFolder() const;                      ///< <root>/ml_disktest
-    QString testFilePattern() const;                 ///< testfile_*
 
     /// 卷上留出的安全余量：2%，夹在 256 MiB ~ 2 GiB 之间。
     static qint64 reserveBytes(quint64 volumeTotal);

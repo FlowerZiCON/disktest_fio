@@ -23,8 +23,6 @@
 #include <QString>
 #include <QStringList>
 
-#include "uitext.h"
-
 class QTimer;
 class ProcessIoCounter;
 
@@ -44,21 +42,6 @@ inline QString jobKindText(JobKind kind)
     }
     return kTextUnknown;
 }
-
-/// fio 每秒打印的 ETA 行解析结果（现在只用来判断测试何时结束）。
-struct EtaSample
-{
-    int     running  = 0;
-    QString state;              ///< r / w / m / f ...
-    double  percent  = -1.0;
-    QString etaText;
-    bool    hasRead  = false;
-    bool    hasWrite = false;
-    double  readMiBs = 0.0;
-    double  writeMiBs = 0.0;
-    double  readIops = 0.0;
-    double  writeIops = 0.0;
-};
 
 /// 一个阶段结束后的汇总。
 struct FioResult
@@ -96,6 +79,12 @@ struct FioResult
     /// （实测就踩了这个坑：530 处失败全被画到 0.24~1.43 GiB）。
     QVector<int> verifyFileIndexes;
 
+    /// 这个阶段有没有"测试本身没跑对"或"数据校验不一致"的证据。
+    ///
+    /// **判定口径只有这一处**：`isClean()`、界面的汇总结论（MainWindow::finishWholeTest）
+    /// 和阶段小结全部走它。以前"这次跑得好不好"在两处各写了一遍，其中一处漏了
+    /// verifyFailures —— 一块真的坏了的盘有可能被判成"合格"。
+    bool hasProblems() const;
     bool isClean() const;
 };
 
@@ -174,6 +163,8 @@ private:
     /// 要计数、要记第一条原话、还要实时通知界面，所以不能混在 warnings 里。
     void scanForVerifyFailures(const QString &text);
     void finalizeResult();
+    /// 删掉本次运行用的 job 文件（它建在系统临时目录里，用完必须清掉）。
+    void removeJobFile();
 
     QProcess         *m_process     = nullptr;
     QTimer           *m_sampleTimer = nullptr;
@@ -181,14 +172,13 @@ private:
 
     QString m_fioPath;
     QString m_workingDir;
-    JobKind m_kind = JobKind::Write;
+    /// 本次运行写到临时目录的那个 job 文件；跑完 / 析构时删掉。
+    QString m_jobFilePath;
     bool    m_running = false;
     bool    m_stoppedByUser = false;
-    QString m_launchError;
 
     QByteArray m_stdoutBuffer;
     QString    m_stdoutAll;
-    QString    m_stderrAll;
     QHash<QString, int> m_warningHits;
     QList<QPair<QString, QString>> m_warningOrder;
     /// 校验失败：累计块数 + 第一条原话 + 去重后的每条原话。

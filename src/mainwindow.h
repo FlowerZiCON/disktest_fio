@@ -219,8 +219,6 @@ private:
     void recordPerfTrace(double x, double readMiBs, double writeMiBs);
     /// 点击某个测试项的读取/写入格子：在**右侧图表**里显示这一项的读写两条曲线。
     void showPerfItemTrace(int itemIndex);
-    /// 按测试项类型取读/写两条线的颜色（顺序项红/蓝，随机项黄/绿）。
-    void perfItemColors(FioConfig::PerfItem item, QColor *readColor, QColor *writeColor) const;
     void reportProblem(const QString &title, const QString &text, bool critical = false);
     /// 测试还没真正开始就失败时的统一出口。
     /// 自检模式下必须仍然出报告并退出，否则会一直挂着。
@@ -303,6 +301,9 @@ private:
     QLabel       *m_avgReadLabel    = nullptr;
     QLabel       *m_fioVersionLabel = nullptr;
     QLabel       *m_ioModeLabel     = nullptr;   ///< 「IO 方式」那行静态说明（引擎探测完要刷新）
+    /// 已经就"引擎不支持直接 I/O"写过一行日志了。这个函数每次改 fio 路径都会
+    /// 被防抖计时器调一次，不加这个闸会把日志刷满。
+    bool          m_bufferedIoWarned = false;
     QLabel       *m_privilegeLabel  = nullptr;   ///< 状态栏右下角：提权模式 / 普通模式
     /// 校验失败的大字红色告警：平时隐藏，fio 一报出不一致就显示。
     /// 它和普通告警不同——普通告警只在日志里写一行红字，很容易被忽略；
@@ -385,6 +386,9 @@ private:
     QString m_perfResultsTarget;   ///< 当前界面和内存里放的是哪个目标的结果
     /// 先把当前结果存回自己那个目标，再把 target 的结果显示出来。
     void switchPerfResultsTo(const QString &root);
+    /// 把界面上的性能结果（格子 + 逐点轨迹）写回 m_perfResults[当前目标]。
+    /// 切盘时和一轮性能测试收尾时都要调，否则 m_perfResults 会落后于界面。
+    void commitPerfResultsToCurrentTarget();
 
     // ---- 图表里现在显示的是"谁的"数据 ----
     // 关键：**性能测试和可靠性测试各自独立**。同一块盘只测过性能时，
@@ -436,7 +440,6 @@ private:
     /// 也写进自检报告 —— 免得用户只看到"我的盘怎么不见了"却查不出原因。
     QStringList     m_ignoredVolumes;
 
-    double   m_phaseOffsetSec = 0.0;   ///< 保留字段：横轴改用容量后不再需要时间偏移
     double   m_elapsedSeconds = 0.0;
     /// 用户已经点了「停止」：此后不再接收任何采样点，曲线就停在按下那一刻。
     bool     m_stopRequested = false;

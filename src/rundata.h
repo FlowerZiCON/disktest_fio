@@ -100,7 +100,11 @@ public:
     /// 参数是否存在（老文件可能整段缺失）。
     bool   hasParam(const QString &key) const { return params.contains(key); }
 
-    /// 横轴上限（GiB）：新文件写 axis_max_GiB，老文件写 axis_max_GB，两种都认。
+    /// 横轴上限（GiB）。优先用文件里记的 axis_max_GiB；只有它缺失、非有限值、
+    /// 或者**包不住数据**（小于最大采样横坐标）时才按数据自己算一个。
+    ///
+    /// 老文件写的是 axis_max_GB。那一版的文件早被 minimumReadableVersion() 挡在
+    /// 门外，所以这个键实际上只对工具/手工造的文件有意义，留着当兜底。
     double axisMaxGiB() const;
 
     /// 可靠性数据：优先取参数里记录的"分阶段"平均值（读取阶段的读均速 /
@@ -121,9 +125,11 @@ public:
 
     // ---- 坏块信息（校验失败）----
 
-    /// 数据校验失败的块数。0 = 没发现不一致。
-    /// 老文件（没有 verify_failures 这个参数）一律是 0，也就是"未知/没记录"。
+    /// 数据校验失败的块数。0 = 没发现不一致；**< 0 = 文件里这一项读不出来**
+    /// （字段缺失或不是数字），那是"未知"，不能当成"没有坏块"。
     int  verifyFailures() const { return m_verifyFailures; }
+    /// 坏块处数是不是一个可信的值（false = 未知/无法解析）。
+    bool verifyFailuresKnown() const { return m_verifyFailures >= 0; }
     /// 逐处的失败原话（fio 的输出，含它自己的偏移量），用于列出坏在哪。
     const QStringList &verifyFailuresText() const { return m_verifyTexts; }
     /// 每一处失败的**文件内字节偏移**，与 verifyFailuresText() 一一对应。
@@ -139,6 +145,29 @@ public:
     /// 逐文件大小（字节，按读取顺序）。坏块位置换算的首选基准。
     const QVector<qint64> &fileSizes() const { return m_fileSizes; }
 
+    /// 坏块位置换算：把"第 fileIndex 个文件内的第 fileOffset 字节"换成
+    /// 图表横坐标（已处理容量，GiB）。
+    ///
+    /// **只有这一份实现**：解析时预换算（写进 verifyAxisX()）和主窗口实时换算
+    /// 都调它。以前两处各写了一遍，连溢出问题都是两份。
+    /// 序号超出已知文件数时按最后一个文件的大小顺延，并且**饱和**处理，
+    /// 不让不可信文件里的天文数字把 qint64 乘溢出（那是有符号溢出，UB）。
+    static double verifyAxisXGiB(int fileIndex, qint64 fileOffset,
+                                 const QVector<qint64> &fileSizes, qint64 fallbackFileSize);
+
+    /// 解析时跳过的采样行数：列数不对、字段解析不出数字、NaN/inf、
+    /// 或者超出单份文件的采样行上限。**不是 0 就说明这份结果不完整**。
+    int droppedSampleCount() const { return m_droppedSamples; }
+
+    /// 性能测试每一项跑多少秒。读文件里记的 perf_runtime_sec；
+    /// 没有或解析不出来才退回 FioConfig::perfRuntimeSeconds()。
+    double perfRuntimeSeconds() const;
+
+    /// 这份结果当初是按"低密度（抽稀）"显示的吗。
+    /// 记了 density 就照它；只有老文件（只记了 line_step）才按
+    /// "当年抽过稀 → 现在也按低密度画"推断。**判定只有这一处**。
+    bool prefersLowDensity() const;
+
     /// 解析器的**纯逻辑自检**：不碰磁盘，只用内存里的字符串验证
     /// 模式判别、老文件兼容、9 列与 7 列采样行的解析。
     /// 每条断言的结果写进 *lines；全部通过返回 true。
@@ -152,8 +181,6 @@ public:
     static QString formatBytes(qint64 bytes);
     /// 秒数 → "00:08:18"。
     static QString formatDuration(qint64 seconds);
-    /// 秒数 → "10.0 s"（性能数据的横轴用）。
-    static QString formatSeconds(double seconds);
 
     // ---- 数据本身 ----
 
@@ -163,7 +190,7 @@ public:
     /// 界面上会附一句"老文件按可靠性渲染"，免得用户以为程序读错了。
     bool    modeExplicit = false;
     /// 写这份结果的程序版本（参数段 app_version）。
-    /// 打开前已经用它把过旧的文件挡掉了，这里留着只为显示/排查。
+    /// 打开前已经用它把过旧的文件挡掉了，留下来只作诊断用（**界面不显示**）。
     QString appVersion;
 
     /// 参数段原样保留（键 → 值），免得每加一个参数都要改结构体。
@@ -187,6 +214,8 @@ public:
     qint64          m_fileSizeBytes = 0;
     /// 逐文件大小（按读取顺序），坏块位置换算的首选基准
     QVector<qint64> m_fileSizes;
+    /// 解析时跳过的采样行数（见 droppedSampleCount）
+    int             m_droppedSamples = 0;
 
     int sampleCount() const { return readV.size(); }
 };

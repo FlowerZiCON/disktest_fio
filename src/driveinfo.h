@@ -165,10 +165,29 @@ struct TestFileSet
     QVector<qint64> sizes;
     qint64      totalBytes = 0;        ///< 全部文件大小之和
     int         count = 0;
+    /// fio 留下的校验状态文件（实测名字是 local-<job>-<n>-verify.state，
+    /// 落在**测试目录**里，不叫 testfile_*）。清理时要一起删掉，
+    /// 所以单独统计 —— 但它**不算**"有测试文件"：
+    /// 能不能只读校验、能不能规划文件，看的都是 testfile_*。
+    QStringList stateNames;
+    qint64      stateBytes = 0;
     bool        isEmpty() const { return count == 0; }
 };
 
-/// 扫描 <folder> 下形如 testfile_* 的文件。
+/// 测试文件名前缀（`testfile_`）。和 FioConfig::fileBaseName() 是一回事，
+/// 这里单独给一个入口是为了让"扫描/清理/校验"三处**用同一个判据**。
+QString testFilePrefix();
+
+/// 这个文件名是不是本程序生成的测试文件：`testfile_<纯数字>`。
+///
+/// 为什么不用 `testfile_*` 这种宽 glob：那个 glob 会把同目录下一个叫
+/// `testfile_backup.dat` 的文件也算进去，而清理路径是**直接删**的。
+/// 目录虽然专用，但"删"这件事上判据越窄越好。
+bool isTestFileName(const QString &name);
+
+/// 扫描 <folder> 下的测试产物：
+///   * `testfile_<数字>`（本程序生成的测试文件）
+///   * fio 的校验状态文件 `*.state`
 TestFileSet scanTestFiles(const QString &folder);
 
 /// 当前进程是否以管理员（Linux 上是 root）身份运行。

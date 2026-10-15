@@ -21,6 +21,8 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace {
 
@@ -49,6 +51,43 @@ bool hasPerfOnlyKey(const QHash<QString, QString> &params)
 /// 不再保留"7 列老格式"的兼容分支——那些文件根本走不到这里。
 constexpr int kSampleColumns = 9;
 
+/// 单份结果文件最多接受多少行采样。
+///
+/// 结果文件是**不可信输入**（可能是别人给的、可能是坏掉的一半文件）。
+/// 没有上限的话，一个几 GB 的文件会把 5 个 QVector<double> 撑到几 GB 内存。
+/// 实测一份 1 TB 分区的可靠性测试也就一万多拍，100 万行远远够用；
+/// 超出的行会被计入 droppedSampleCount() 并在界面上说出来，不静默丢。
+constexpr int kMaxSampleRows = 1000 * 1000;
+
+/// 解析采样行里的一个数值字段。
+///
+/// 必须**整段都是数字**，而且结果是有限值：
+///   * 不检查 ok 的话，"abc" 会静默变成 0，一行坏数据被当成有效采样；
+///   * Qt 的 toDouble 认 "nan" / "inf"（ok = true），放进来会污染平均值、
+///     让曲线和汇总出现 nan；
+///   * 小数逗号（"1,5"）会让整行的列位置整体错开，那种行只有靠"列数必须
+///     正好等于 kSampleColumns"才能挡住（见 parseStream）。
+bool fieldToDouble(const QString &text, double *out)
+{
+    bool ok = false;
+    const double value = text.toDouble(&ok);
+    if (!ok || !std::isfinite(value))
+        return false;
+    *out = value;
+    return true;
+}
+
+/// 同上，整数列。
+bool fieldToInt(const QString &text, int *out)
+{
+    bool ok = false;
+    const int value = text.toInt(&ok);
+    if (!ok)
+        return false;
+    *out = value;
+    return true;
+}
+
 } // namespace
 
 int RunData::compareVersions(const QString &a, const QString &b)
@@ -58,12 +97,19 @@ int RunData::compareVersions(const QString &a, const QString &b)
     const auto parts = [](const QString &text) {
         QVector<int> out;
         for (const QString &seg : text.split(QLatin1Char('.'), Qt::SkipEmptyParts)) {
-            // "7-beta" 这种只取前导数字；取不到就算 0
+            // "7-beta" 这种只取前导数字；取不到就算 0。
+            // **累加要封顶**：版本号来自文件，"99999999999999999999.0.0" 这种
+            // 20 位段位会把 int 乘溢出（有符号溢出是 UB，编译器完全可以
+            // 据此做出任意假设）。到 INT_MAX 就不再往上加了。
             int value = 0;
             int digits = 0;
             for (const QChar c : seg) {
                 if (!c.isDigit())
                     break;
+                if (value > (std::numeric_limits<int>::max() - 9) / 10) {
+                    value = std::numeric_limits<int>::max();
+                    break;
+                }
                 value = value * 10 + c.digitValue();
                 ++digits;
             }
@@ -118,31 +164,109 @@ QString RunData::formatDuration(qint64 seconds)
         .arg(seconds % 60, 2, 10, QLatin1Char('0'));
 }
 
-QString RunData::formatSeconds(double seconds)
-{
-    return QStringLiteral("%1 s").arg(seconds, 0, 'f', 1);
-}
-
 double RunData::paramDouble(const QString &key, double fallback) const
 {
     if (!params.contains(key))
         return fallback;
     bool ok = false;
     const double value = params.value(key).toDouble(&ok);
-    return ok ? value : fallback;
+    return (ok && std::isfinite(value)) ? value : fallback;
+}
+
+double RunData::perfRuntimeSeconds() const
+{
+    // 每项跑多少秒是**写这份结果时**决定的，必须跟着文件走。
+    // 以前读侧直接写死 FioConfig::perfRuntimeSeconds()：一份每项 30 秒的结果
+    // 会被标成"每项固定 10 秒"，横轴也被裁到 10 秒，后 20 秒的曲线直接看不见。
+    const double recorded = paramDouble(QStringLiteral("perf_runtime_sec"), 0.0);
+    if (recorded > 0.0 && recorded <= 24.0 * 3600.0)
+        return recorded;
+    return double(FioConfig::perfRuntimeSeconds());
+}
+
+bool RunData::prefersLowDensity() const
+{
+    const QString recorded = param(QStringLiteral("density"));
+    if (recorded == QLatin1String("low"))
+        return true;
+    if (recorded == QLatin1String("high"))
+        return false;
+    // 没有 density（2.2.7 那会儿还没有这一项）：line_step > 1 说明当年抽过稀，
+    // 那就照用户当初看到的样子画。
+    return paramDouble(QStringLiteral("line_step"), 0.0) > 1.0;
+}
+
+double RunData::verifyAxisXGiB(int fileIndex, qint64 fileOffset,
+                               const QVector<qint64> &fileSizes, qint64 fallbackFileSize)
+{
+    constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+    if (fileOffset < 0)
+        return -1.0;
+
+    // 文件序号来自不可信文件里的 verify_file_index，必须夹住：
+    // 不夹的话 `fileSizes.last() * (index - size)` 会乘溢出（有符号溢出，UB），
+    // 算出来的横坐标是垃圾，图上会画出一条位置毫无意义的色带。
+    // 上限取"已知文件数 + 一点点"，因为 fio 报的序号理论上不该超出它。
+    const int maxIndex = fileSizes.isEmpty() ? 4096 : int(fileSizes.size()) + 8;
+    const int index = qBound(0, fileIndex, maxIndex);
+
+    // 全局字节 = Σ(序号之前的文件) + 文件内偏移；逐步饱和，不让它溢出。
+    const qint64 kLimit = std::numeric_limits<qint64>::max() / 4;
+    qint64 before = 0;
+    if (!fileSizes.isEmpty()) {
+        for (int i = 0; i < index && i < fileSizes.size(); ++i) {
+            const qint64 size = qMax<qint64>(0, fileSizes.at(i));
+            before = (size > kLimit - before) ? kLimit : before + size;
+        }
+        // 序号超出已知文件数（理论上不会）：后面的按最后那个文件的大小顺延
+        if (index > fileSizes.size()) {
+            const qint64 last = qMax<qint64>(0, fileSizes.last());
+            const qint64 extra = (last > kLimit / qMax(1, index - fileSizes.size()))
+                                     ? kLimit
+                                     : last * (index - fileSizes.size());
+            before = (extra > kLimit - before) ? kLimit : before + extra;
+        }
+    } else if (fallbackFileSize > 0) {
+        // 没有逐文件大小（老文件只有 file_size_bytes）：只能按统一大小算
+        const qint64 index64 = index;
+        before = (fallbackFileSize > kLimit / qMax<qint64>(1, index64))
+                     ? kLimit
+                     : fallbackFileSize * index64;
+    }
+    const qint64 total = (fileOffset > kLimit - before) ? kLimit : before + fileOffset;
+    return double(total) / kGiB;
 }
 
 double RunData::axisMaxGiB() const
 {
+    // 1) 数据本身要求的下限：横轴至少要包住所有采样点。
+    //    两种模式都算：横坐标在可靠性里是"已处理容量"，在性能里是"秒"，
+    //    但"文件里记的上限必须包住数据"这条要求是一样的。
+    double maxX = 0.0;
+    for (double x : readX)
+        maxX = qMax(maxX, x);
+    for (double x : writeX)
+        maxX = qMax(maxX, x);
+
+    // 2) 文件里记的上限。**只要它能包住数据就照用**（那是当初画图时的真实值，
+    //    回看要和当初一致）；只有缺失、非有限值、或者包不住数据时才按数据补。
+    //    以前无条件信文件里的值：缺这一项就退回 1.0 GiB，于是 58 GiB 的曲线
+    //    被裁到只剩前 1 GiB，而界面上什么都不说。
     for (const char *key : kAxisKeys) {
         const QString k = QString::fromLatin1(key);
         if (!params.contains(k))
             continue;
         bool ok = false;
         const double value = params.value(k).toDouble(&ok);
-        if (ok && value > 0.0)
+        if (!ok || !std::isfinite(value) || value <= 0.0)
+            continue;
+        if (value >= maxX)
             return value;
+        break;   // 记了但包不住数据：往下走去按数据算
     }
+
+    if (maxX > 0.0)
+        return maxX * 1.02;
     return 1.0;
 }
 
@@ -219,14 +343,16 @@ QVector<RunData::Trace> RunData::perfTraces() const
         const int pass = passes.value(i, kUnknownIndex);
         const quint8 f = flags.value(i, 0);
         Trace &trace = traces[item];
-        if (pass >= 0) {
-            // 有 pass 列：这一拍属于哪一趟是明确的。
-            if (pass == 0 && (f & 1))
+        // pass 只认 0（读取趟）/ 1（写入趟）。**认不出来时退回按 has_read /
+        // has_write 分流，不能把这一拍直接丢掉** —— 那种行里明明有数据
+        // （f 的对应位是 1），静默丢掉就是平白少画一段曲线。
+        if (pass == 0) {
+            if (f & 1)
                 trace.read.append(QPointF(readX.value(i, 0.0), readV.at(i)));
-            else if (pass == 1 && (f & 2))
+        } else if (pass == 1) {
+            if (f & 2)
                 trace.write.append(QPointF(writeX.value(i, 0.0), writeV.at(i)));
         } else {
-            // 没有 pass 列：一场只跑一个方向，按 has_read/has_write 分流就分得开。
             if (f & 1)
                 trace.read.append(QPointF(readX.value(i, 0.0), readV.at(i)));
             if (f & 2)
@@ -295,32 +421,61 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
             continue;
         }
         const QStringList f = line.split(QLatin1Char(','));
-        // 列数不够的行直接跳过，不能让一行坏数据把后面的列位置错开。
-        // （版本门槛已经保证不存在 7 列的老文件，所以只有这一种格式。）
-        if (f.size() < kSampleColumns)
+        // 列数必须**正好** 9 列。少了说明这行被截断；多了说明值里混进了逗号
+        // （欧洲小数写法 "1,5" 就是这种），两种都不能按列位置硬读 ——
+        // 多一列时按位置读会把整行数据**整体错位**，却照样"解析成功"。
+        if (f.size() != kSampleColumns) {
+            ++parsed.m_droppedSamples;
             continue;
-        parsed.readX << f.at(0).toDouble();
-        parsed.readV << f.at(1).toDouble();
-        const quint8 hasRead = (f.at(2).toInt() != 0) ? 1 : 0;
-        parsed.writeX << f.at(3).toDouble();
-        parsed.writeV << f.at(4).toDouble();
-        const quint8 hasWrite = (f.at(5).toInt() != 0) ? 2 : 0;
-        parsed.durations << f.at(6).toDouble();
-        parsed.flags << quint8(hasRead | hasWrite);
-        parsed.items << f.at(7).toInt();
-        parsed.passes << f.at(8).toInt();
+        }
+        if (parsed.readV.size() >= kMaxSampleRows) {
+            ++parsed.m_droppedSamples;   // 超上限的行不再收，也不静默
+            continue;
+        }
+
+        double readX = 0.0;
+        double readV = 0.0;
+        double writeX = 0.0;
+        double writeV = 0.0;
+        double duration = 0.0;
+        int hasRead = 0;
+        int hasWrite = 0;
+        int item = kUnknownIndex;
+        int pass = kUnknownIndex;
+        // 任何一列解析不出来就整行丢掉并计数：静默当 0 会让一行坏数据
+        // 变成"一个速度很低的采样点"，悄悄拉低平均值、骗过曲线。
+        if (!fieldToDouble(f.at(0), &readX) || !fieldToDouble(f.at(1), &readV)
+            || !fieldToInt(f.at(2), &hasRead) || !fieldToDouble(f.at(3), &writeX)
+            || !fieldToDouble(f.at(4), &writeV) || !fieldToInt(f.at(5), &hasWrite)
+            || !fieldToDouble(f.at(6), &duration) || !fieldToInt(f.at(7), &item)
+            || !fieldToInt(f.at(8), &pass)) {
+            ++parsed.m_droppedSamples;
+            continue;
+        }
+
+        parsed.readX << readX;
+        parsed.readV << readV;
+        parsed.writeX << writeX;
+        parsed.writeV << writeV;
+        parsed.durations << duration;
+        parsed.flags << quint8((hasRead != 0 ? 1 : 0) | (hasWrite != 0 ? 2 : 0));
+        parsed.items << item;
+        parsed.passes << pass;
     }
 
-    if (!magicOk || parsed.readV.isEmpty()) {
-        return fail(QStringLiteral("%1\n第一行应当是 \"# %2\"，并且含 [samples] 数据段。")
-                        .arg(QDir::toNativeSeparators(path),
-                             QString::fromLatin1(RunData::magic())));
+    // ---- 文件类型标记 ----
+    // 只查这一条就够：没有标记的文件连参数段都不可信。
+    if (!magicOk) {
+        return fail(kMsgBadCsvHeader.arg(QDir::toNativeSeparators(path),
+                                         QString::fromLatin1(RunData::magic())));
     }
 
     // ---- 版本门槛 ----
-    // **过旧的结果文件一律不打开**，直接给一句"版本过旧、请重新测试"。
+    // **必须排在"有没有采样行"之前**：过旧的文件（7 列采样）在采样循环里
+    // 会被整段当成坏行丢掉，如果先判"一个采样行都没有"，用户看到的会是
+    // "第一行格式不对"，而真正的原因是版本过旧 —— 提示会把人引向错误的方向。
     //
-    // 为什么不做兼容：这个格式在 2.2.7 里改动很大（test_mode、item/pass、
+    // 为什么干脆不支持老文件：这个格式在 2.2.7 里改动很大（test_mode、item/pass、
     // 坏块信息、逐文件大小、file_sizes 都是新加的）。老文件缺字段时只能靠猜，
     // 猜出来的图看着正常、位置和内容却是错的——那比明说"不支持"更坑人。
     // 没有 app_version 的文件 = 2.2.7 之前存的，同样在拒收之列。
@@ -333,6 +488,13 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
     if (RunData::compareVersions(parsed.appVersion, minimum) < 0) {
         return fail(kErrRunDataTooOld.arg(QDir::toNativeSeparators(path),
                                           parsed.appVersion, minimum));
+    }
+
+    // 到这里格式和版本都对了：一个采样行都没解析出来，说明数据段本身是空的
+    // 或者整段坏掉了。这和"第一行不是标记"是两件事，必须分开说。
+    if (parsed.readV.isEmpty()) {
+        return fail(kErrRunDataNoSamples.arg(QDir::toNativeSeparators(path))
+                        .arg(parsed.m_droppedSamples));
     }
 
     // ---- 模式判别 ----
@@ -353,9 +515,21 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
     // ---- 坏块信息 ----
     // 老文件没有这几项，读出来就是"0 处、没有明细"，也就是"这块盘当时没发现坏块"，
     // 界面按"没有坏块信息"处理，不显示那一行。
-    parsed.m_verifyFailures =
-        int(parsed.params.value(QStringLiteral("verify_failures"), QStringLiteral("0"))
-                .toDouble());
+    //
+    // 但"写了却读不出来"和"没写"是两回事：前者是文件坏了，必须记成**未知（-1）**。
+    // 以前两条路都落到 0，而 0 的含义是"没发现不一致" —— 一个坏掉的字段就足以
+    // 把"这块盘坏了"这个结论抹掉。
+    {
+        const QString text = parsed.params.value(QStringLiteral("verify_failures")).trimmed();
+        bool ok = false;
+        const qlonglong value = text.toLongLong(&ok);
+        if (ok && value >= 0 && value <= std::numeric_limits<int>::max())
+            parsed.m_verifyFailures = int(value);
+        else if (text.isEmpty())
+            parsed.m_verifyFailures = 0;    // 没有这一项 = 没记录到坏块
+        else
+            parsed.m_verifyFailures = -1;   // 有这一项但读不出来 = 未知
+    }
     // 逐处的原话和偏移是两条用 | 分隔的并列列表：**顺序一一对应**。
     // 用 | 而不是逗号，是因为原话里本来就有逗号（fio 的完整输出很长）。
     const auto splitList = [](const QString &text) {
@@ -370,9 +544,20 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
         const qint64 value = part.toLongLong(&ok);
         parsed.m_verifyOffsets << (ok ? value : qint64(-1));
     }
-    parsed.m_fileSizeBytes =
-        qint64(parsed.params.value(QStringLiteral("file_size_bytes"), QStringLiteral("0"))
-                   .toDouble());
+    // 单文件大小：本程序写的是整数（QString::number(qint64)），工具造的文件也
+    // 可能是整数字符串。以前走 toDouble 再转 qint64：天文数字或 NaN 是 UB。
+    {
+        const QString text = parsed.params.value(QStringLiteral("file_size_bytes")).trimmed();
+        bool ok = false;
+        qlonglong value = text.toLongLong(&ok);
+        if (!ok) {
+            // 容忍 "1073741824.0" 这种写法，但仍然要夹住范围
+            const double d = text.toDouble(&ok);
+            if (ok && std::isfinite(d) && d > 0.0 && d < 9.0e18)
+                value = qlonglong(d);
+        }
+        parsed.m_fileSizeBytes = (ok && value > 0) ? qint64(value) : 0;
+    }
     // 逐文件大小：坏块位置的换算基准。只读校验时盘上现成的文件不一定等大，
     // 所以优先用这份列表，没有（老文件）才退回统一的 file_size_bytes。
     //
@@ -400,28 +585,13 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
     // 现在就换算好"盘上位置"（GiB）：这一步要同时用到文件序号和文件大小，
     // 两者都是解析时才知道的，放到界面里去算容易漏掉一个。
     //
-    // 全局字节 = Σ(前 fileIndex 个文件的大小) + 文件内偏移
-    // 逐文件大小缺失时退回"序号 × 统一大小"；两者都没有就只能当成第一个文件。
+    // 换算只有一份实现（RunData::verifyAxisXGiB），主窗口实时换算也调它：
+    // 以前这里和 MainWindow::verifyPositionToAxisX 各写了一遍，连溢出问题都两份。
     for (int i = 0; i < parsed.m_verifyOffsets.size(); ++i) {
-        const qint64 offset = parsed.m_verifyOffsets.at(i);
-        if (offset < 0) {
-            parsed.m_verifyAxisX << -1.0;
-            continue;
-        }
-        const int index = qMax(0, parsed.m_verifyFileIndexes.value(i, 0));
-        qint64 before = 0;
-        if (!parsed.m_fileSizes.isEmpty()) {
-            for (int f = 0; f < index && f < parsed.m_fileSizes.size(); ++f)
-                before += parsed.m_fileSizes.at(f);
-            // 序号超出已知文件数：后面的按最后一个文件的大小顺延
-            if (index > parsed.m_fileSizes.size()) {
-                before += parsed.m_fileSizes.last()
-                          * (index - parsed.m_fileSizes.size());
-            }
-        } else if (parsed.m_fileSizeBytes > 0) {
-            before = index * parsed.m_fileSizeBytes;
-        }
-        parsed.m_verifyAxisX << double(before + offset) / (1024.0 * 1024.0 * 1024.0);
+        parsed.m_verifyAxisX << RunData::verifyAxisXGiB(parsed.m_verifyFileIndexes.value(i, 0),
+                                                        parsed.m_verifyOffsets.at(i),
+                                                        parsed.m_fileSizes,
+                                                        parsed.m_fileSizeBytes);
     }
 
     *data = parsed;
@@ -430,8 +600,13 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
 
 bool RunData::parse(const QString &path, RunData *data, QString *error)
 {
-    if (!data)
+    if (!data) {
+        // 不能只返回 false：调用方会拿 *error 去弹对话框，空的 error
+        // 会弹出一个内容空白的警告框。
+        if (error)
+            *error = kErrLoadDataFailed;
         return false;
+    }
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -692,6 +867,133 @@ bool RunData::runParserSelfTest(QStringList *lines)
         const bool ok = parseText(QStringLiteral("test_mode,performance\n# [samples]\n")
                                   + header9 + QLatin1Char('\n'), &d);
         check(QStringLiteral("缺 magic 的文件被拒"), !ok, QString());
+    }
+
+    // 9) 坏采样行必须**整行丢掉并计数**，不能静默当成 0：
+    //      * 列数不对（值里混了逗号，欧洲小数写法就是这种）
+    //      * 字段不是数字
+    //      * nan / inf（Qt 的 toDouble 认这两个词，会把它当合法采样收下）
+    //    一行坏数据混进来，要么悄悄拉低平均值，要么让整条曲线出现 nan。
+    {
+        QStringList rows;
+        rows << QStringLiteral("# ml_disktest-run-data;1")
+             << versionLine
+             << QStringLiteral("test_mode,reliability")
+             << QStringLiteral("# [samples]") << header9
+             // 唯一一行好的：读 250 MiB/s
+             << QStringLiteral("0.000000,250.000,1,0.000000,0.000,0,0.500,0,0")
+             // 小数逗号 → 10 列，整行错位
+             << QStringLiteral("1,5,250.000,1,0.000,0.000,0,0.500,0,0")
+             // 不是数字
+             << QStringLiteral("0.100000,abc,1,0.000000,0.000,0,0.500,0,0")
+             // nan / inf
+             << QStringLiteral("0.200000,nan,1,0.000000,0.000,0,0.500,0,0")
+             << QStringLiteral("0.300000,inf,1,0.000000,0.000,0,0.500,0,0");
+        RunData d;
+        const bool ok = parseText(text(rows), &d);
+        const double avg = d.averageReadMiBps();
+        check(QStringLiteral("坏采样行被丢掉并计数"),
+              ok && d.sampleCount() == 1 && d.droppedSampleCount() == 4,
+              QStringLiteral("(收下 %1 行，丢掉 %2 行)")
+                  .arg(d.sampleCount()).arg(d.droppedSampleCount()));
+        check(QStringLiteral("坏行不污染平均值（不是 nan、仍为 250）"),
+              std::isfinite(avg) && qAbs(avg - 250.0) < 1e-9,
+              QStringLiteral("(平均=%1)").arg(avg, 0, 'f', 3));
+    }
+
+    // 10) verify_failures 读不出来必须是**未知**，不能变成"0 处"。
+    //     0 的含义是"没发现不一致"——一个坏掉的字段就足以把"盘坏了"的结论抹掉。
+    {
+        const auto body = [&](const QString &verifyLine) {
+            QStringList rows;
+            rows << QStringLiteral("# ml_disktest-run-data;1")
+                 << versionLine
+                 << QStringLiteral("test_mode,reliability");
+            if (!verifyLine.isEmpty())
+                rows << verifyLine;
+            rows << QStringLiteral("# [samples]") << header9
+                 << QStringLiteral("0.000000,0.000,0,0.000000,100.000,1,0.500,0,0");
+            return rows.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        };
+        RunData noParam;
+        RunData broken;
+        RunData negative;
+        const bool parsed = parseText(body(QString()), &noParam)
+                            && parseText(body(QStringLiteral("verify_failures,abc")), &broken)
+                            && parseText(body(QStringLiteral("verify_failures,-5")), &negative);
+        check(QStringLiteral("没写坏块字段 = 0 处（已记录）"),
+              parsed && noParam.verifyFailures() == 0 && noParam.verifyFailuresKnown(),
+              QStringLiteral("(=%1)").arg(noParam.verifyFailures()));
+        check(QStringLiteral("坏块字段损坏 = 未知，不是 0 处"),
+              broken.verifyFailures() < 0 && !broken.verifyFailuresKnown(),
+              QStringLiteral("(=%1)").arg(broken.verifyFailures()));
+        check(QStringLiteral("负数坏块数 = 未知"),
+              !negative.verifyFailuresKnown(), QString());
+    }
+
+    // 11) 坏块序号是天文数字时不能乘溢出（那是有符号溢出，UB）。
+    //     旧实现在这里会算出垃圾甚至负数，图上的色带位置完全没有意义。
+    {
+        QStringList rows;
+        rows << QStringLiteral("# ml_disktest-run-data;1")
+             << versionLine
+             << QStringLiteral("test_mode,reliability")
+             << QStringLiteral("file_sizes,1099511627776")          // 1 TiB
+             << QStringLiteral("verify_failures,1")
+             << QStringLiteral("verify_offsets,0")
+             << QStringLiteral("verify_file_index,2147483647")      // 放大到离谱
+             << QStringLiteral("# [samples]") << header9
+             << QStringLiteral("0.000000,0.000,0,0.000000,100.000,1,0.500,0,0");
+        RunData d;
+        const bool ok = parseText(text(rows), &d);
+        const double x = d.verifyAxisX().isEmpty() ? -1.0 : d.verifyAxisX().first();
+        check(QStringLiteral("坏块序号被夹住、不溢出"),
+              ok && std::isfinite(x) && x >= 0.0,
+              QStringLiteral("(横坐标=%1 GiB)").arg(x, 0, 'f', 3));
+    }
+
+    // 12) 横轴上限缺失时必须**按数据自己算**，不能回落到 1.0 GiB ——
+    //     那会把 58 GiB 的曲线裁到只剩前 1 GiB，而且什么都不说。
+    {
+        QStringList rows;
+        rows << QStringLiteral("# ml_disktest-run-data;1")
+             << versionLine
+             << QStringLiteral("test_mode,reliability")
+             << QStringLiteral("# [samples]") << header9
+             << QStringLiteral("58.000000,250.000,1,0.000000,0.000,0,0.500,0,0")
+             << QStringLiteral("0.000000,0.000,0,58.000000,100.000,1,0.500,0,1");
+        RunData d;
+        const bool ok = parseText(text(rows), &d);
+        check(QStringLiteral("横轴上限缺失时包住数据"),
+              ok && d.axisMaxGiB() >= 58.0,
+              QStringLiteral("(=%1 GiB)").arg(d.axisMaxGiB(), 0, 'f', 3));
+    }
+
+    // 13) 性能每项时长跟着文件走：一份每项 30 秒的结果不能被按 10 秒渲染
+    {
+        QStringList rows;
+        rows << QStringLiteral("# ml_disktest-run-data;1")
+             << versionLine
+             << QStringLiteral("test_mode,performance")
+             << QStringLiteral("perf_runtime_sec,30")
+             << QStringLiteral("# [samples]") << header9
+             << QStringLiteral("0.000000,100.000,1,0.000000,0.000,0,0.500,0,0");
+        RunData d;
+        RunData noParam;
+        QStringList rowsNoParam;
+        rowsNoParam << QStringLiteral("# ml_disktest-run-data;1")
+                    << versionLine
+                    << QStringLiteral("test_mode,performance")
+                    << QStringLiteral("# [samples]") << header9
+                    << QStringLiteral("0.000000,100.000,1,0.000000,0.000,0,0.500,0,0");
+        const bool ok = parseText(text(rows), &d) && parseText(text(rowsNoParam), &noParam);
+        check(QStringLiteral("每项时长取文件里的值（30 秒）"),
+              ok && qAbs(d.perfRuntimeSeconds() - 30.0) < 1e-9,
+              QStringLiteral("(=%1)").arg(d.perfRuntimeSeconds(), 0, 'f', 1));
+        check(QStringLiteral("文件里没记时长才用默认 10 秒"),
+              qAbs(noParam.perfRuntimeSeconds()
+                   - double(FioConfig::perfRuntimeSeconds())) < 1e-9,
+              QStringLiteral("(=%1)").arg(noParam.perfRuntimeSeconds(), 0, 'f', 1));
     }
 
     return allOk;

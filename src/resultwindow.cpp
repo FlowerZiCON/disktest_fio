@@ -37,34 +37,12 @@
 
 namespace {
 
-/// 回看用的密度档：文件里记了 density 就照它，老文件（只有 line_step）说明
-/// 当年是按低密度抽着看的 —— 跟着它，用户看到的疏密和当初一致。
-bool lowDensityFor(const RunData &data)
-{
-    const QString recorded = data.param(QStringLiteral("density"));
-    if (recorded == QLatin1String("low"))
-        return true;
-    if (recorded == QLatin1String("high"))
-        return false;
-    return data.paramDouble(QStringLiteral("line_step"), 0.0) > 1.0;
-}
+/// 结果表里的格子数必须正好等于性能测试项的数量：
+/// 填格子的循环按 allPerfItems() 走，数组长度却是编译期固定的，
+/// 两边不一致就是越界写。
+constexpr int kExpectedPerfCells = 4;
 
 } // namespace
-
-void ResultWindow::perfItemColors(int itemIndex, QColor *readColor, QColor *writeColor)
-{
-    // 顺序项红/蓝，随机项黄/绿。**只按测试项分**，不按"读取/写入"分——
-    // 和主界面点结果格子得到的颜色是同一套规则。
-    const FioConfig::PerfItem item = FioConfig::allPerfItems().value(
-        itemIndex, FioConfig::PerfItem::SeqQ8T1);
-    if (FioConfig::perfItemIsRandom(item)) {
-        *readColor = QColor(0xf0, 0xc0, 0x00);
-        *writeColor = QColor(0x2e, 0xaa, 0x4a);
-    } else {
-        *readColor = QColor(220, 30, 30);
-        *writeColor = QColor(30, 70, 220);
-    }
-}
 
 ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     : QDialog(parent)
@@ -174,9 +152,16 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
 
     // 坏块信息：这是"这块盘到底坏没坏"的结论，比任何速度数字都重要，
     // 所以紧跟摘要、并且单独用红字，而不是混在速度那几项里。
-    // 没有坏块信息（0 处且无明细）就不显示——不能凭空报红。
-    const bool hasVerifyInfo =
-        m_data.verifyFailures() > 0 || !m_data.verifyFailuresText().isEmpty();
+    //
+    // 三种情况要分开：
+    //   * 记了 N > 0 处          → 报红，结论是"盘坏了"
+    //   * 记了 0 处、也没有明细   → 不显示（不能凭空报红）
+    //   * 计数这一项读不出来      → **也要报**，但说的是"读不出来"而不是"0 处"。
+    //     以前这一种会落到 0，也就是把一个损坏的字段当成了"没有坏块"。
+    const bool verifyKnown = m_data.verifyFailuresKnown();
+    const int verifyCount = m_data.verifyFailures();
+    const bool hasVerifyInfo = !verifyKnown || verifyCount > 0
+                               || !m_data.verifyFailuresText().isEmpty();
 
     for (int row = 0; row < rowsBacking.size(); ++row) {
         const QVector<QPair<QString, QString>> &rowEntries = rowsBacking.at(row);
@@ -200,15 +185,37 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         // 提示语**和实时那条一字不差**（同一个 kVerifyBannerHead + kVerifyBannerNote）：
         // 同一件事在两个地方用两套措辞，用户会以为是两回事。
         // 这里不再列"首处偏移量"——运行日志里有逐处明细，图上还有黄色色带定位。
+        QString verifyText;
+        QString verifyNote;
+        if (verifyKnown) {
+            verifyText = kVerifyBannerHead.arg(verifyCount);
+            verifyNote = kVerifyBannerNote;
+            // 告警说 N 处、文件里却只有几条明细时说明一句，否则会让人
+            // 以为"就只有这几处坏"（图上能画的色带也只到明细那么多）。
+            const int details = m_data.verifyFailuresText().size();
+            if (verifyCount > details && details > 0)
+                verifyNote += QLatin1Char('\n') + kResultVerifyDetailsShort.arg(details).arg(verifyCount);
+        } else {
+            verifyText = kVerifyCountUnreadable;
+            verifyNote = kVerifyCountUnreadableNote;
+        }
         auto *verifyLabel = new QLabel(this);
-        verifyLabel->setText(kVerifyBannerHead.arg(m_data.verifyFailures())
-                             + QLatin1Char('\n') + kVerifyBannerNote);
+        verifyLabel->setText(verifyText + QLatin1Char('\n') + verifyNote);
         verifyLabel->setWordWrap(true);
         verifyLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         verifyLabel->setStyleSheet(
             QStringLiteral("color:#d32020; font-weight:bold; border:2px solid #d32020;"
                            " border-radius:4px; padding:6px; background:#fff2f0;"));
         root->addWidget(verifyLabel);
+    }
+
+    // 解析时跳过的采样行：这份结果**不完整**，必须说出来 ——
+    // 静默少画几个点，用户会拿一条缺口的曲线当成真实曲线。
+    if (m_data.droppedSampleCount() > 0) {
+        auto *skipped = new QLabel(kStatusSkippedLines.arg(m_data.droppedSampleCount()), this);
+        skipped->setStyleSheet(QStringLiteral("color:#8a6d00;"));
+        skipped->setWordWrap(true);
+        root->addWidget(skipped);
     }
 
     // ---- 图表 ----
@@ -261,27 +268,12 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
 
 void ResultWindow::rebuildReliabilityChart()
 {
-    m_chart->clear();
-    m_chart->setCapacityAxis(m_data.axisMaxGiB());
-    m_chart->setDensity(lowDensityFor(m_data) ? SpeedChart::Density::Low
-                                              : SpeedChart::Density::High);
-
-    const bool plotRead = std::any_of(m_data.flags.cbegin(), m_data.flags.cend(),
-                                      [](quint8 f) { return (f & 1) != 0; });
-    const bool plotWrite = std::any_of(m_data.flags.cbegin(), m_data.flags.cend(),
-                                       [](quint8 f) { return (f & 2) != 0; });
-    m_chart->setDirections(plotRead, plotWrite);
-
-    for (int i = 0; i < m_data.sampleCount(); ++i) {
-        const quint8 f = m_data.flags.value(i, 0);
-        m_chart->appendSample(m_data.readX.value(i, 0.0), (f & 1) != 0,
-                              m_data.readV.value(i, 0.0),
-                              m_data.writeX.value(i, 0.0), (f & 2) != 0,
-                              m_data.writeV.value(i, 0.0));
-    }
-    // 末点必须画出来：抽稀按"第几个点"算，末点不是 step 的整数倍时会被抽掉，
-    // 曲线末端就够不到横轴右边缘（实测：最后一点缺失）。
-    m_chart->finishSamples();
+    // 渲染只有一份实现（SpeedChart::plotRunData）：主窗口加载历史数据走的是
+    // 同一个函数，同一份文件在两个窗口里画出来必然一样。
+    // 密度用上面那组单选控件的当前值（它初始化时已经取自文件）。
+    SpeedChart::plotRunData(m_data, m_chart,
+                            m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                           : SpeedChart::Density::High);
 }
 
 void ResultWindow::buildChartStyleRow(QVBoxLayout *root)
@@ -313,11 +305,11 @@ void ResultWindow::buildChartStyleRow(QVBoxLayout *root)
     // 密度取自文件，老文件只有 line_step 时按"当年抽过稀 → 低密度"。
     const QString style = m_data.param(QStringLiteral("plot_style"));
     (style == QLatin1String("scatter") ? m_scatterRadio : m_lineRadio)->setChecked(true);
-    (lowDensityFor(m_data) ? m_densityLowRadio : m_densityHighRadio)->setChecked(true);
+    (m_data.prefersLowDensity() ? m_densityLowRadio : m_densityHighRadio)->setChecked(true);
     m_chart->setPlotStyle(style == QLatin1String("scatter") ? SpeedChart::PlotStyle::Scatter
                                                             : SpeedChart::PlotStyle::Line);
-    m_chart->setDensity(lowDensityFor(m_data) ? SpeedChart::Density::Low
-                                              : SpeedChart::Density::High);
+    m_chart->setDensity(m_data.prefersLowDensity() ? SpeedChart::Density::Low
+                                                   : SpeedChart::Density::High);
 
     const auto applyStyle = [this]() {
         m_chart->setPlotStyle(m_lineRadio->isChecked() ? SpeedChart::PlotStyle::Line
@@ -345,7 +337,13 @@ void ResultWindow::buildChartStyleRow(QVBoxLayout *root)
 
 void ResultWindow::buildPerfTable(QVBoxLayout *root)
 {
-    auto *box = new QGroupBox(kGroupPerfItems.arg(FioConfig::perfRuntimeSeconds()), this);
+    // 这个循环按 allPerfItems() 的长度填 m_readCells / m_writeCells 这两个
+    // 固定长度数组：项数一旦不是 4 就是数组外写。编译期先钉住，
+    // 运行时再用 qMin 夹一次（allPerfItems() 不是 constexpr，钉不住它本身）。
+    static_assert(kExpectedPerfCells == ResultWindow::kPerfCellCount,
+                  "性能测试项数量变了：m_readCells/m_writeCells 的长度要跟着改");
+
+    auto *box = new QGroupBox(kGroupPerfItems.arg(m_data.perfRuntimeSeconds()), this);
     auto *grid = new QGridLayout(box);
     grid->setContentsMargins(6, 6, 6, 6);
     grid->setHorizontalSpacing(8);
@@ -367,9 +365,12 @@ void ResultWindow::buildPerfTable(QVBoxLayout *root)
 
     const QVector<RunData::Trace> &traces = m_traces;
     const QVector<FioConfig::PerfItem> all = FioConfig::allPerfItems();
+    // 两个循环都走同一个上界：格子数（= 数组长度），再夹住轨迹条数，
+    // 这样"填格子"和"设满量程"永远一致，也不会越界。
+    const int cells = qMin(kPerfCellCount, qMin(all.size(), traces.size()));
     double scaleMax = 1.0;
 
-    for (int i = 0; i < all.size(); ++i) {
+    for (int i = 0; i < cells; ++i) {
         auto *name = new QLabel(FioConfig::perfItemName(all.at(i)), box);
         grid->addWidget(name, i + 1, 0);
 
@@ -397,7 +398,7 @@ void ResultWindow::buildPerfTable(QVBoxLayout *root)
     }
 
     // 所有格子共用一个满量程，条长才有可比性
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kPerfCellCount; ++i) {
         if (m_readCells[i])
             m_readCells[i]->setScaleMax(scaleMax);
         if (m_writeCells[i])
@@ -414,35 +415,14 @@ void ResultWindow::rebuildPerfChart(int item)
     if (item < 0 || item >= all.size())
         return;
 
-    // 按值取：perfTraces() 返回的是临时对象，用 const& 接会立刻悬空。
-    const RunData::Trace trace = m_traces.at(item);
-    QColor readColor;
-    QColor writeColor;
-    perfItemColors(item, &readColor, &writeColor);
-
-    m_chart->clear();
-    m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    // 性能项每趟才 20 来个点，抽稀本来没意义；但**跟随用户选的那一档**，
-    // 免得图上按高密度画、上面的单选却停在低密度，两边对不上。
-    m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
-                                                       : SpeedChart::Density::High);
-    m_chart->setDirections(!trace.read.isEmpty(), !trace.write.isEmpty());
-
-    const int count = qMax(trace.read.size(), trace.write.size());
-    for (int i = 0; i < count; ++i) {
-        const bool hasRead = i < trace.read.size();
-        const bool hasWrite = i < trace.write.size();
-        m_chart->appendSample(hasRead ? trace.read.at(i).x() : 0.0, hasRead,
-                              hasRead ? trace.read.at(i).y() : 0.0,
-                              hasWrite ? trace.write.at(i).x() : 0.0, hasWrite,
-                              hasWrite ? trace.write.at(i).y() : 0.0);
-    }
-    // 末点必须画出来：每一趟的末尾是 10.0 秒那个收尾补点，
-    // 曲线不能停在 9.5 秒、右边缘空一格。两个抽稀函数都显式保留首末点，
-    // 所以 refreshPlot 一跑就满足。
-    m_chart->finishSamples();
-    // 颜色随时可设：refreshPlot 只灌数据，不碰画笔
-    m_chart->setSeriesColors(readColor, writeColor);
+    // 渲染只有一份实现（SpeedChart::plotPerfItem）：主界面点结果格子走的是
+    // 同一个函数，两处画出来必然一样。
+    // 每项跑多少秒跟着**文件里记的**走，不是写死 10 秒：一份每项 30 秒的结果
+    // 按 10 秒画，后 20 秒的曲线会被轴裁掉、看着像没测。
+    // 密度**跟随用户选的那一档**，免得图上按高密度画、上面的单选却停在低密度。
+    SpeedChart::plotPerfItem(m_data, m_chart, item,
+                             m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                            : SpeedChart::Density::High);
 
     // 只显示这一项：图表上不可能同时画四条线，所以固定"一次一项"，
     // 和主界面点结果格子看到的是同一张图。
@@ -451,20 +431,12 @@ void ResultWindow::rebuildPerfChart(int item)
 
 void ResultWindow::rebuildPerfCombinedChart()
 {
+    // 老文件没有分项信息：只能把整份数据画成一条合起来的读/写曲线。
+    // 同样是 SpeedChart::plotRunData（它按数据模式自动用时间轴）。
     m_selectedItem = -1;
-    m_chart->clear();
-    m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    m_chart->setDensity(m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
-                                                       : SpeedChart::Density::High);
-    m_chart->setDirections(true, true);
-    for (int i = 0; i < m_data.sampleCount(); ++i) {
-        const quint8 f = m_data.flags.value(i, 0);
-        m_chart->appendSample(m_data.readX.value(i, 0.0), (f & 1) != 0,
-                              m_data.readV.value(i, 0.0),
-                              m_data.writeX.value(i, 0.0), (f & 2) != 0,
-                              m_data.writeV.value(i, 0.0));
-    }
-    m_chart->finishSamples();   // 末点必须保留，理由同上
+    SpeedChart::plotRunData(m_data, m_chart,
+                            m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                           : SpeedChart::Density::High);
     m_hintLabel->setText(kResultPerfNoItemNote);
 }
 

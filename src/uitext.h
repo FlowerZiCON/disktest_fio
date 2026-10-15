@@ -168,6 +168,12 @@ inline const QString kLabelRwMode        = QStringLiteral("读写模式");
 inline const QString kLabelBlockSize     = QStringLiteral("块大小");
 inline const QString kLabelIodepth       = QStringLiteral("队列深度");
 inline const QString kIoModeDirectFmt    = QStringLiteral("%1 + 直接 I/O（绕过系统缓存）");
+/// 探测到的引擎不支持直接 I/O（Windows 上的 psync/sync/vsync/mmap）时的说明。
+/// 这种情况数字会包含系统缓存，必须让用户看到，不能默默当真。
+inline const QString kIoModeBufferedFmt  = QStringLiteral("%1 + 缓冲 I/O（该引擎不支持直接 I/O）");
+inline const QString kLogBufferedIoWarning =
+    QStringLiteral("引擎 %1 不支持直接 I/O，本次改为缓冲 I/O —— 读数会包含系统缓存，"
+                   "只能作参考，不能当磁盘真实性能。");
 inline const QString kLabelRounds        = QStringLiteral("测试圈数");
 inline const QString kRoundsSuffix       = QStringLiteral(" 圈");
 inline const QString kRoundsTip          =
@@ -191,7 +197,6 @@ inline const QString kLogRoundSummary    = QStringLiteral("第 %1 圈结束：�
 inline const QString kLogRoundSummaryBad = QStringLiteral("第 %1 圈结束：发现异常（%2）");
 inline const QString kLogAllRoundsDone   = QStringLiteral("全部 %1 圈测试结束");
 inline const QString kLogOneRoundDone    = QStringLiteral("测试结束");
-inline const QString kLogRunConclusion   = QStringLiteral("结论：%1");
 inline const QString kLogErrorPrefix     = QStringLiteral("错误：%1");
 inline const QString kLogWarnPrefix      = QStringLiteral("警告：%1");
 inline const QString kIoModeTip          =
@@ -396,7 +401,20 @@ inline const QString kErrRunDataTooOldNoVersion =
                    "请用当前版本重新跑一次测试并保存。");
 inline const QString kMsgBadCsvHeader           =
     QStringLiteral("%1\n第一行应当是 \"# %2\"，并且含 [samples] 数据段。");
+/// 格式和版本都对，但一个采样行都没解析出来（数据段为空、或者整段坏掉）。
+/// 这和"第一行不是标记"是两件事，分开说才不会把人引向错误的排查方向。
+inline const QString kErrRunDataNoSamples       =
+    QStringLiteral("%1\n文件里有 [samples] 数据段，但没有任何一行能解析成采样点"
+                   "（跳过了 %2 行）。\n文件可能已损坏，或者不是本程序保存的结果。");
 inline const QString kErrBusyLoading            = QStringLiteral("正在测试中，请先点「停止」再加载历史数据。");
+/// 目标是裸设备 / 物理磁盘路径。本工具只做文件模式，这类路径一律拒绝。
+inline const QString kErrTargetIsRawDevice      =
+    QStringLiteral("目标不能是裸设备或物理磁盘：\n%1\n\n"
+                   "本工具只在普通文件上做测试，请选择一个分区里的可写目录。");
+/// 覆盖/清理确认框里补一句：除了测试文件，还有 fio 留下的校验状态文件会被删。
+/// %1 = 个数，%2 = 合计大小
+inline const QString kMsgAlsoStateFiles         =
+    QStringLiteral("\n另外还会删除 %1 个 fio 校验状态文件（%2）。");
 inline const QString kErrNoContentToSave        = QStringLiteral("没有可保存的内容");
 inline const QString kErrNoOutputYet            = QStringLiteral("还没有跑过测试，或者 fio 没有产生输出。");
 inline const QString kErrDeleteOldFiles         = QStringLiteral("无法删除旧文件：%1");
@@ -443,6 +461,16 @@ inline const QString kVerifyBannerHead = QStringLiteral("⚠ 数据校验失败�
 /// 第二行：只说结论和该做什么，不摆 fio 原话——偏移量在日志里有逐处明细。
 inline const QString kVerifyBannerNote =
     QStringLiteral("该磁盘存在问题，请尽快备份数据并更换该盘。");
+/// 结果窗口专用：文件里的坏块计数**读不出来**（字段坏了）。
+/// 这一种不能按"0 处"处理——那等于把"这块盘坏了"的结论抹掉。
+inline const QString kVerifyCountUnreadable =
+    QStringLiteral("⚠ 数据校验结果无法读取：结果文件里的坏块计数已损坏");
+inline const QString kVerifyCountUnreadableNote =
+    QStringLiteral("无法判断当时有没有发现坏块，建议用当前版本重新测试一次。");
+/// 结果窗口专用：告警说 N 处，但文件里只留下了前几条明细时补一句。
+/// %1 = 明细条数，%2 = 记录的总处数
+inline const QString kResultVerifyDetailsShort =
+    QStringLiteral("（结果文件里只留下了前 %1 处明细，当时记录的总数是 %2 处）");
 /// 日志里每发现一块坏块记一行：%1 = 第几块，%2 = fio 原话
 inline const QString kLogVerifyFailure = QStringLiteral("校验失败第 %1 处：%2");
 /// 阶段结束时把总数写进日志：%1 = 总块数
@@ -450,7 +478,18 @@ inline const QString kLogVerifySummary = QStringLiteral("★ 本阶段共发现 
 /// 逐处明细被截断时补一句：%1 = 记了多少条，%2 = 总共多少处
 inline const QString kLogVerifyTruncated =
     QStringLiteral("（上面只列出前 %1 处，本次共 %2 处）");
+/// 图表上能标的坏块位置到了上限：%1 = 上限，%2 = 没标出来的处数
+inline const QString kLogVerifyMarkersTruncated =
+    QStringLiteral("（图表上最多标 %1 处坏块位置，本次还有 %2 处没在图上标出来；"
+                   "运行日志与保存的结果文件里是全的）");
 inline const QString kLogVerifyNone    = QStringLiteral("数据校验通过：没有发现不一致的块");
+/// 一个阶段跑完了，却既没有采样点、也没有 fio 的读写汇总：很可能**什么都没测**。
+/// 实测：测试目录里残留的文件比块大小还小，fio 一次 I/O 都没发，退出码却是 0，
+/// 于是"什么都没测"看起来和"测过了没问题"一模一样。只写日志、不改结论 ——
+/// 汇总的解析依赖 fio 的输出格式，拿它去判 FAIL 有可能误伤好盘。
+inline const QString kLogPhaseDidNothing =
+    QStringLiteral("★ %1没有产生任何 I/O（既没有采样，也没有 fio 汇总）——"
+                   "这一阶段很可能什么都没测到：请确认测试文件完整、且大于块大小。");
 /// 报告里的校验失败行：%1 = 第几处，%2 = fio 原话
 inline const QString kReportVerifyLine = QStringLiteral("*** 数据校验失败第 %1 处: %2");
 inline const QString kStatusVerifyFailed = QStringLiteral("★ 已发现 %1 处数据校验失败");
@@ -577,6 +616,12 @@ inline const QString kReportStateEnd         = QStringLiteral("状态标签     
 inline const QString kReportStateObserved    = QStringLiteral("   运行期间出现过=");
 inline const QString kReportGuardRawDevice   = QStringLiteral("裸设备路径拦截      : ");
 inline const QString kReportGuardSyncEngine  = QStringLiteral("同步引擎分类        : ");
+/// 裸设备路径必须被 validate() **真的拒掉**（不只是"检测函数算得对"）
+inline const QString kReportGuardRawReject   = QStringLiteral("裸设备路径被拒      : ");
+/// 校验失败必须让这一阶段判成"有问题"（坏盘不能被判成合格）
+inline const QString kReportGuardVerifyVerdict = QStringLiteral("校验失败即不合格    : ");
+/// 测试文件名的判据（testfile_<数字>）—— 清理路径靠它决定删什么
+inline const QString kReportGuardTestFileName = QStringLiteral("测试文件名判据      : ");
 inline const QString kReportGuardWindowIcon  = QStringLiteral("窗口图标            : ");
 inline const QString kReportGuardAutoStep    = QStringLiteral("抽稀（LTTB 保尖峰）: ");
 inline const QString kReportGuardExclusive   = QStringLiteral("单选互斥（绘图方式/密度）: ");
@@ -644,7 +689,6 @@ inline const QString kRoundTagFmt      = QStringLiteral("第 %1 圈 · ");
 // ── 模式与性能测试 ──
 inline const QString kModeNameReliability = QStringLiteral("可靠性测试");
 inline const QString kModeNamePerformance = QStringLiteral("性能测试");
-inline const QString kLabelTestMode       = QStringLiteral("测试模式");
 inline const QString kModeReliabilityTip  = QStringLiteral("把选中分区写满，再读回逐块校验，用来发现坏块和静默数据损坏。");
 inline const QString kModePerformanceTip  = QStringLiteral("先建好测试文件，再依次跑四个测试项，每项固定 10 秒，测读/写吞吐。");
 // 四个测试项
@@ -657,7 +701,6 @@ inline const QString kLabelPerfSize       = QStringLiteral("测试数据大小")
 inline const QString kPerfSizeTip         = QStringLiteral("测试文件会按这个大小事先建好（固定单文件，不分片）。");
 inline const QString kPerfColRead         = QStringLiteral("读取 (MiB/s)");
 inline const QString kPerfColWrite        = QStringLiteral("写入 (MiB/s)");
-inline const QString kPerfHeaderHint      = QStringLiteral("勾选要跑的项目，结果会填到右边");
 inline const QString kWindowTitleFmt      = QStringLiteral("%1 %2 -%3");
 inline const QString kChartPlaceholder    = QStringLiteral("请先点击「开始测试」");
 inline const QString kChartTitleTime      = QStringLiteral("时间（秒）");
@@ -682,7 +725,6 @@ inline const QString kResultSummarySeqRead = QStringLiteral("平均顺序读取"
 inline const QString kResultSummarySeqWrite= QStringLiteral("平均顺序写入");
 inline const QString kResultSummaryData    = QStringLiteral("测试数据");
 inline const QString kResultSummaryPlan    = QStringLiteral("文件计划");
-inline const QString kResultNoSamples      = QStringLiteral("这份文件里没有任何采样点。");
 inline const QString kResultPerfHint       =
     QStringLiteral("四条曲线分别对应四个测试项。点某一行下面的数字格子，"
                    "图表里就只显示那一项的读写曲线；再点一次恢复显示全部。");
@@ -691,14 +733,12 @@ inline const QString kResultReliabilityHint =
 inline const QString kResultLegacyModeNote = QStringLiteral("（老文件未记录测试模式，按可靠性数据渲染）");
 // 结果窗口里的坏块提示**直接复用实时告警条那两句**
 // （kVerifyBannerHead + kVerifyBannerNote）：同一件事不该有两套措辞。
-inline const QString kResultShowAll        = QStringLiteral("显示全部项");
 inline const QString kResultShowOneFmt     = QStringLiteral("只显示：%1");
 inline const QString kResultPerfItemFmt    = QStringLiteral("%1 读 %2 / 写 %3");
 inline const QString kResultPerfNoItemNote =
     QStringLiteral("这份性能数据没有记录每一项的归属（老格式），只能画一条读/写合计曲线。"
                    "重新跑一次性能测试并保存，就能按测试项分别回看。");
 inline const QString kLogPerfItemStart    = QStringLiteral("%1 开始（每趟 %2 秒，读写各一趟）");
-inline const QString kLogPerfItemDone     = QStringLiteral("%1 完成：读取 %2，写入 %3");
 inline const QString kLogPerfAllDone      = QStringLiteral("全部 %1 项测试结束");
 inline const QString kLogPerfCleanup      = QStringLiteral("性能测试结束，已删除测试文件");
 inline const QString kStatusFinishedFinal = QStringLiteral("测试结束");
@@ -720,7 +760,6 @@ inline const QString kErrPerfDataSize     = QStringLiteral("测试数据大小�
 inline const QString kModeGroupTitle      = QStringLiteral("测试模式");
 inline const QString kLogPreparingFiles   = QStringLiteral("准备中：正在预建测试文件 %1/%2");
 inline const QString kLogPerfPassDone     = QStringLiteral("%1 %2 完成：%3");
-inline const QString kDlgTraceTitle       = QStringLiteral("%1 · %2（%3）");
 inline const QString kTraceShownTip       = QStringLiteral("右边图表显示的是 %1 的读写曲线");
 inline const QString kTraceNoData         = QStringLiteral("这一项还没有数据。");
 inline const QString kTraceBusyTip        = QStringLiteral("测试进行中，结束后才能查看明细。");

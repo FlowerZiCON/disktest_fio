@@ -70,6 +70,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <limits>
 
 #ifndef Q_OS_WIN
 #  include <unistd.h>   // fsync：预分配写完必须落盘，见 preallocNextFile()
@@ -117,7 +118,10 @@ QString formatSpeed(double mib)
 
 QString formatBytes(quint64 bytes)
 {
-    return RunData::formatBytes(qint64(bytes));
+    // 饱和到 qint64 上限再转：容量远到不了 8 EiB，但真到了也不该回绕成负数
+    // （那会被 RunData::formatBytes 的 qMax(0, bytes) 变成 "0 B"）。
+    constexpr quint64 kMax = quint64(std::numeric_limits<qint64>::max());
+    return RunData::formatBytes(qint64(qMin(bytes, kMax)));
 }
 
 QString formatDuration(qint64 seconds)
@@ -167,6 +171,16 @@ bool isVerifyRelatedWarning(const QString &warning)
            || warning.contains(QStringLiteral("校验失败"))
            || warning.contains(QStringLiteral("非法字节序列"))
            || warning.contains(QStringLiteral("校验头不匹配"));
+}
+
+/// 确认框里的补充说明：除了测试文件，fio 的校验状态文件也会被一起删掉。
+/// 测试目录里没有这类文件就不加这句（绝大多数情况下只有 testfile_*）。
+QString stateFilesNote(const TestFileSet &set)
+{
+    if (set.stateNames.isEmpty())
+        return QString();
+    return kMsgAlsoStateFiles.arg(set.stateNames.size())
+                             .arg(RunData::formatBytes(set.stateBytes));
 }
 
 /// 把卷根路径统一成可以直接做字符串比较的形式。
@@ -937,16 +951,32 @@ void MainWindow::applyDetectedIoEngine(const QString &fioPath)
     // 引擎不能再写死：Windows 固定 windowsaio，Linux 得看这份 fio 到底编了哪些。
     // 探测失败（没有 fio、超时、输出看不懂）就**保持平台默认值**，
     // 不要因为探测不出来就把界面搞成"没有引擎可用"。
+    //
+    // queryEngines() 返回的顺序就是候选优先级（已按 candidateIoEngines() 排好），
+    // 所以 first() 就是最该用的那个。
     const QStringList available = FioRunner::queryEngines(fioPath);
+    FioConfig::setIoEngine(available.isEmpty() ? QString() : available.first());
 
-    QString picked = FioConfig::defaultIoEngine();
-    if (!available.isEmpty()) {
-        picked = available.first();   // queryEngines 只挑候选，顺序就是优先级
+    // 探测到的引擎可能不支持直接 I/O（Windows 上的 psync / sync / vsync / mmap）。
+    // 那种情况下 job 会退回缓冲 I/O，读数包含系统缓存 —— 必须**明确说出来**，
+    // 否则用户会把一个被缓存放大的数字当成磁盘真实性能。
+    const bool buffered = !FioConfig::directIo();
+    if (m_ioModeLabel) {
+        m_ioModeLabel->setText(buffered
+                                   ? kIoModeBufferedFmt.arg(FioConfig::ioEngine())
+                                   : kIoModeDirectFmt.arg(FioConfig::ioEngine()));
+        m_ioModeLabel->setStyleSheet(buffered
+                                         ? QStringLiteral("color:#b5750f; font-weight:bold;")
+                                         : QStringLiteral("color:#666;"));
     }
-    FioConfig::setIoEngine(available.isEmpty() ? QString() : picked);
-
-    if (m_ioModeLabel)
-        m_ioModeLabel->setText(kIoModeDirectFmt.arg(FioConfig::ioEngine()));
+    // 只在这个状态**第一次**出现时写一行日志：这个函数每次改 fio 路径都会被
+    // 防抖计时器调一次，无条件写会把日志刷满。
+    if (buffered && !m_bufferedIoWarned) {
+        m_bufferedIoWarned = true;
+        logEvent(kLogBufferedIoWarning.arg(FioConfig::ioEngine()), true);
+    } else if (!buffered) {
+        m_bufferedIoWarned = false;
+    }
 }
 
 void MainWindow::setFioPath(const QString &path)
@@ -1388,9 +1418,11 @@ bool MainWindow::confirmOverwriteTestFiles()
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle(kDlgOverwriteTitle);
-    box.setText(kMsgOverwriteBody.arg(QDir::toNativeSeparators(folder))
-                    .arg(existing.count)
-                    .arg(formatBytes(quint64(existing.totalBytes))));
+    QString body = kMsgOverwriteBody.arg(QDir::toNativeSeparators(folder))
+                       .arg(existing.count)
+                       .arg(formatBytes(quint64(existing.totalBytes)));
+    body += stateFilesNote(existing);
+    box.setText(body);
     QPushButton *go = box.addButton(kBtnContinue, QMessageBox::AcceptRole);
     QPushButton *cancel = box.addButton(kBtnCancel, QMessageBox::RejectRole);
     box.setDefaultButton(cancel);   // 默认落在「取消」上，别让回车顺手删了数据
@@ -1536,18 +1568,32 @@ QString MainWindow::currentModeName() const
                                                                  : kModeNameReliability;
 }
 
+void MainWindow::commitPerfResultsToCurrentTarget()
+{
+    // 把界面上（格子 + 逐点轨迹）当前这份性能结果存回它所属的那个目标。
+    //
+    // 必须有两个调用点：
+    //   * 切盘时 —— 把旧盘的结果留住（switchPerfResultsTo）
+    //   * **一轮性能测试跑完时** —— 以前只有切盘那一条路会写回，
+    //     于是跑完之后如果一直不切盘，updateChartPlaceholder() 查
+    //     m_perfResults 会说"这个目标没有数据"，切一下模式再切回来，
+    //     图表位置就变成"请先开始测试"，而右边四个格子还留着刚测出的数字。
+    if (m_perfResultsTarget.isEmpty() || m_runner->isBusy())
+        return;
+
+    PerfResult &stored = m_perfResults[m_perfResultsTarget];
+    for (int i = 0; i < 4; ++i) {
+        stored.readValue[i] = m_perfReadCells[i] ? m_perfReadCells[i]->value() : -1.0;
+        stored.writeValue[i] = m_perfWriteCells[i] ? m_perfWriteCells[i]->value() : -1.0;
+        stored.readTrace[i] = m_perfReadTrace[i];
+        stored.writeTrace[i] = m_perfWriteTrace[i];
+    }
+}
+
 void MainWindow::switchPerfResultsTo(const QString &root)
 {
     // 先把当前盘的结果存回去（正在跑测试时不保存，那时显示的就是本盘数据）
-    if (!m_perfResultsTarget.isEmpty() && !m_runner->isBusy()) {
-        PerfResult &stored = m_perfResults[m_perfResultsTarget];
-        for (int i = 0; i < 4; ++i) {
-            stored.readValue[i] = m_perfReadCells[i] ? m_perfReadCells[i]->value() : -1.0;
-            stored.writeValue[i] = m_perfWriteCells[i] ? m_perfWriteCells[i]->value() : -1.0;
-            stored.readTrace[i] = m_perfReadTrace[i];
-            stored.writeTrace[i] = m_perfWriteTrace[i];
-        }
-    }
+    commitPerfResultsToCurrentTarget();
 
     m_perfResultsTarget = root;
     const PerfResult stored = m_perfResults.value(root);
@@ -1677,12 +1723,13 @@ void MainWindow::onCleanupTestFiles()
     }
 
     if (!m_selfTestMode) {
+        const QString body = kMsgConfirmCleanup
+                                 .arg(QDir::toNativeSeparators(folder))
+                                 .arg(set.count)
+                                 .arg(formatBytes(quint64(set.totalBytes)))
+                             + stateFilesNote(set);
         const auto answer = QMessageBox::question(
-            this, kDlgCleanupTitle,
-            kMsgConfirmCleanup
-                .arg(QDir::toNativeSeparators(folder))
-                .arg(set.count)
-                .arg(formatBytes(quint64(set.totalBytes))),
+            this, kDlgCleanupTitle, body,
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (answer != QMessageBox::Yes)
             return;
@@ -1944,65 +1991,19 @@ void MainWindow::onLoadRunData()
 /// 把一份解析好的结果画进图表。
 ///
 /// **只画图，不碰任何界面状态**：卡片、"图表属于哪块盘"、"图表栈"都不在这里改。
-/// 所以同一个函数既能喂给独立结果窗口，也能喂给自检用的主图表——
-/// 唯一的前提是两份数据渲染规则本来就应该完全一样。
-/// 否则会出现"窗口里按性能画、主界面按可靠性画"这种不一致。
+/// 所以同一个函数既能喂给独立结果窗口，也能喂给自检用的主图表。
+///
+/// 渲染本身（定轴、设方向、逐点灌数据、收尾刷新、按测试项取色）**只有一份实现**：
+/// SpeedChart::plotRunData。主窗口和结果窗口各写一遍的时候，
+/// 两条路径已经真的画出过不一样的东西（轴来源不同、颜色规则两份）。
+/// 这里只负责决定密度档。
 static void fillChartFromRunData(const RunData &data, SpeedChart *chart)
 {
-    const bool perf = (data.mode == RunData::Mode::Performance);
-    const bool plotRead = std::any_of(data.flags.cbegin(), data.flags.cend(),
-                                      [](quint8 f) { return (f & 1) != 0; });
-    const bool plotWrite = std::any_of(data.flags.cbegin(), data.flags.cend(),
-                                       [](quint8 f) { return (f & 2) != 0; });
-    // 密度档：优先看文件里记的 density；老文件只记了 line_step，
-    // 那就"当年抽过稀 → 现在按低密度画"，保持用户当初看到的样子。
-    const QString densityParam = data.param(QStringLiteral("density"));
-    const bool lowDensity = (densityParam == QLatin1String("low"))
-                            || (densityParam.isEmpty()
-                                && data.paramDouble(QStringLiteral("line_step"), 0.0) > 1.0);
-
-    chart->clear();
-    chart->setPlotStyle(data.param(QStringLiteral("plot_style")) == QLatin1String("scatter")
-                            ? SpeedChart::PlotStyle::Scatter
-                            : SpeedChart::PlotStyle::Line);
-    if (perf) {
-        // 性能数据的"容量列"里放的是秒，轴要按时间画
-        const double seconds = data.paramDouble(QStringLiteral("axis_max_GiB"),
-                                                double(FioConfig::perfRuntimeSeconds()));
-        chart->setTimeAxis(seconds > 0.0 ? seconds : double(FioConfig::perfRuntimeSeconds()));
-    } else {
-        chart->setCapacityAxis(data.axisMaxGiB());
-    }
-    chart->setDirections(plotRead, plotWrite);
-    chart->setDensity(lowDensity ? SpeedChart::Density::Low : SpeedChart::Density::High);
-
-    for (int i = 0; i < data.sampleCount(); ++i) {
-        const quint8 f = data.flags.value(i, 0);
-        chart->appendSample(data.readX.value(i, 0.0), (f & 1) != 0,
-                            data.readV.value(i, 0.0),
-                            data.writeX.value(i, 0.0), (f & 2) != 0,
-                            data.writeV.value(i, 0.0));
-    }
-    // 点加完了，重建折线让**最后一个点一定画出来**。
-    // 抽稀是"每隔 step 个点保留一个"，末点落在哪一格是偶然的，
-    // 不是 step 的整数倍时就被抽掉，曲线末端够不到横轴右边缘。
-    chart->finishSamples();
-
-    if (perf) {
-        // 性能 CSV 是多场次叠在一份文件里的，颜色按"第一项有数据的"来定，
-        // 只影响这一张合起来的时间图；分项回看请用「打开测试结果」窗口。
-        const QVector<RunData::Trace> itemTraces = data.perfTraces();
-        for (int i = 0; i < itemTraces.size(); ++i) {
-            if (!itemTraces.at(i).hasRead() && !itemTraces.at(i).hasWrite())
-                continue;
-            const FioConfig::PerfItem item = FioConfig::allPerfItems().value(i);
-            if (FioConfig::perfItemIsRandom(item))
-                chart->setSeriesColors(QColor(0xf0, 0xc0, 0x00), QColor(0x2e, 0xaa, 0x4a));
-            else
-                chart->setSeriesColors(QColor(220, 30, 30), QColor(30, 70, 220));
-            break;
-        }
-    }
+    // 密度档：用户当初看到的是哪一档就按哪一档画
+    // （判定只有一处：RunData::prefersLowDensity）。
+    SpeedChart::plotRunData(data, chart,
+                            data.prefersLowDensity() ? SpeedChart::Density::Low
+                                                     : SpeedChart::Density::High);
 }
 
 bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart *target)
@@ -2072,7 +2073,11 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
         info << runData.param(QStringLiteral("mode"));
     if (runData.hasParam(QStringLiteral("target")))
         info << runData.param(QStringLiteral("target"));
-    const QString message = info.join(kTextJoinDot);
+    QString message = info.join(kTextJoinDot);
+    // 有跳过的采样行就明说：这份数据是**不完整的**，静默少画几个点
+    // 会让人拿一条缺口的曲线当成真实曲线。
+    if (runData.droppedSampleCount() > 0)
+        message += kStatusSkippedLines.arg(runData.droppedSampleCount());
     statusBar()->showMessage(message);
     recordOutput(kReportLoadData.arg(path));
     recordOutput(message);
@@ -2280,18 +2285,20 @@ void MainWindow::setRunningState(bool running)
 
 bool MainWindow::clearTestFiles(const QString &folder, QString *error)
 {
-    QDir dir(folder);
-    if (!dir.exists())
-        return true;
+    // **删什么由 scanTestFiles() 说了算**：扫描（统计、确认框）与删除必须共用
+    // 同一份判据，否则确认框里报的"N 个文件 / X GiB"和实际删掉的东西对不上 ——
+    // 以前清理删的是 "testfile_*" + "*.state"（两种），统计只算 "testfile_*"，
+    // 于是确认框从来不提那些 .state 文件（实测它们叫 local-<job>-<n>-verify.state）。
+    const TestFileSet set = scanTestFiles(folder);
+    QStringList targets = set.names;
+    targets += set.stateNames;
 
-    // 连同 fio 留下的校验状态文件一起删掉
-    const QFileInfoList entries = dir.entryInfoList(
-        QStringList{QStringLiteral("testfile_*"), QStringLiteral("*.state")},
-        QDir::Files | QDir::NoSymLinks);
-    for (const QFileInfo &info : entries) {
-        if (!QFile::remove(info.absoluteFilePath())) {
+    QDir dir(folder);
+    for (const QString &name : targets) {
+        const QString path = dir.absoluteFilePath(name);
+        if (!QFile::remove(path)) {
             if (error)
-                *error = kErrDeleteOldFiles.arg(info.absoluteFilePath());
+                *error = kErrDeleteOldFiles.arg(path);
             return false;
         }
     }
@@ -2371,7 +2378,6 @@ void MainWindow::onStart()
 
     m_activeConfig = cfg;
     m_outcomes.clear();
-    m_phaseOffsetSec = 0.0;
     m_elapsedSeconds = 0.0;
     m_logLines.clear();
     m_observedStates.clear();
@@ -2840,39 +2846,15 @@ void MainWindow::setDebugForceVerifyBanner(bool force)
 
 double MainWindow::verifyPositionToAxisX(int fileIndex, qint64 fileOffset) const
 {
-    // 图表横轴 = "已处理容量"（GiB）；fio 给的是**第 N 个文件内的第 off 字节**。
+    // 换算规则**只有一份**（RunData::verifyAxisXGiB）：解析历史文件时算一遍、
+    // 这里实时再算一遍，两处必须是同一个答案，否则同一块坏块在实时曲线上
+    // 和回看时会被画到不同的位置。以前两处各写了一遍，连溢出问题都是两份。
     //
-    // fio 是顺序读的，所以读到第 N 个文件的 off 处时，已经处理掉的字节就是
-    // **前面所有文件的总长 + off**：
-    //     全局字节 = Σ(前 fileIndex 个文件的大小) + off
-    //
-    // 两个都不能省：
-    //   * **文件序号**：fio 报的偏移每个文件都从 0 开始，testfile_0 的 256 MiB
-    //     和 testfile_3 的 256 MiB 是两个不同的盘上位置。只用偏移定位的话，
-    //     所有坏块都会挤到图上最前面那一段。
-    //   * **逐文件大小**：只读校验用的是盘上现成的文件，它们不一定等大
-    //     （可能是上一轮用别的测试数据尺寸留下的），不能拿一个统一大小去乘。
-    constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
-    if (fileOffset < 0)
-        return -1.0;
-    const int index = qMax(0, fileIndex);
-
-    qint64 before = 0;
-    if (!m_verifyFileSizes.isEmpty()) {
-        // 逐文件大小：累加序号之前的那些文件
-        for (int i = 0; i < index && i < m_verifyFileSizes.size(); ++i)
-            before += m_verifyFileSizes.at(i);
-        // 序号超出已知文件数（理论上不会）：后面的按最后那个文件的大小顺延
-        if (index > m_verifyFileSizes.size() && !m_verifyFileSizes.isEmpty()) {
-            const qint64 last = m_verifyFileSizes.last();
-            before += last * (index - m_verifyFileSizes.size());
-        }
-    } else if (m_verifyFileSize > 0) {
-        // 没有逐文件大小（老文件只有 file_size_bytes）：只能按统一大小算
-        before = index * m_verifyFileSize;
-    }
-    // 两者都没有：只能把它当成"第一个文件里的这个偏移"，位置会偏但不会离谱
-    return double(before + fileOffset) / kGiB;
+    // 基准是"每个测试文件的字节数"（见 m_verifyFileSizes 的说明）：
+    //   * 文件序号不能省：fio 报的偏移每个文件都从 0 开始；
+    //   * 逐文件大小不能省：只读校验用的是盘上现成的文件，不一定等大。
+    return RunData::verifyAxisXGiB(fileIndex, fileOffset, m_verifyFileSizes,
+                                   m_verifyFileSize);
 }
 
 void MainWindow::onVerifyFailure(int totalCount, const QString &text,
@@ -3012,6 +2994,15 @@ void MainWindow::onJobFinished(const FioResult &result)
         appendSamplePoint(endX, endX, readTail, writeTail, 0.0);
     }
 
+    // 阶段跑完了，却**既没有采样点、也没有 fio 的读写汇总**：这一阶段很可能
+    // 什么都没测。实测过一次：测试目录里剩下的那个文件比块大小还小，fio 一次
+    // I/O 都没发出来，退出码却是 0 —— 于是"什么都没测"和"测过了、没问题"
+    // 在结论里长得一模一样。这里只写一行红字，**不改结论**：
+    // 汇总的解析依赖 fio 的输出格式，拿它去判 FAIL 有可能误伤好盘。
+    if (stats.count == 0 && !result.hasRead && !result.hasWrite && !result.cancelled) {
+        logEvent(kLogPhaseDidNothing.arg(jobKindText(result.kind)), true);
+    }
+
     PhaseOutcome outcome;
     outcome.round = m_currentRound;
     outcome.kind = result.kind;
@@ -3046,6 +3037,14 @@ void MainWindow::onJobFinished(const FioResult &result)
                                                            result.verifyOffsets.at(i));
                     if (x >= 0.0)
                         m_chart->addVerifyMarker(x);
+                }
+                // 图上能标的处数有上限。到顶了必须说一句，否则"告警说 900 处、
+                // 图上只有稀稀几条"会被读成"只有那几处坏"。
+                if (m_chart->droppedVerifyMarkerCount() > 0) {
+                    logEvent(kLogVerifyMarkersTruncated
+                                 .arg(m_chart->maxVerifyMarkers())
+                                 .arg(m_chart->droppedVerifyMarkerCount()),
+                             true);
                 }
             }
             // 先给总数，再逐处列出坏在哪。
@@ -3169,25 +3168,11 @@ QVector<FioConfig::PerfItem> MainWindow::checkedPerfItems() const
     return list;
 }
 
-void MainWindow::perfItemColors(FioConfig::PerfItem item, QColor *readColor,
-                                QColor *writeColor) const
-{
-    // 顺序项红/蓝，随机项黄/绿。**只按测试项分**，不按"读取/写入"分——
-    // 否则点顺序项的格子会画成黄绿，和列表里看到的对不上。
-    if (FioConfig::perfItemIsRandom(item)) {
-        *readColor = QColor(0xf0, 0xc0, 0x00);
-        *writeColor = QColor(0x2e, 0xaa, 0x4a);
-    } else {
-        *readColor = QColor(220, 30, 30);
-        *writeColor = QColor(30, 70, 220);
-    }
-}
-
 void MainWindow::logPerfToChart(FioConfig::PerfItem item)
 {
     QColor readColor;
     QColor writeColor;
-    perfItemColors(item, &readColor, &writeColor);
+    FioConfig::perfItemColors(item, &readColor, &writeColor);
     m_chart->setSeriesColors(readColor, writeColor);
 }
 
@@ -3206,7 +3191,10 @@ void MainWindow::dropTrailingTailSample()
     if (m_tailDropped)
         return;   // 每个阶段只丢一次
     const int n = m_readSamples.size();
-    if (n < 3)
+    // 判据是**本阶段**的采样点数，不是整轮的总数：多圈测试里第 2 圈之后的阶段
+    // 前面还压着上一圈的采样，用总数判断会把"只有一两拍的短阶段"也当成点够多，
+    // 于是它仅有的一拍被丢掉、这一阶段的曲线直接空了。
+    if (n - m_phaseStartIndex < 3)
         return;   // 点太少就不动，免得把短测试的曲线删空
     m_tailDropped = true;
 
@@ -3572,26 +3560,13 @@ void MainWindow::showPerfItemTrace(int itemIndex)
 
     // 直接在**右边的主图表**里画这一项的读写两条曲线，不另开窗口。
     // 两趟的横轴都是 0~10 秒，所以两条线天然叠在同一段时间上。
+    // 渲染只有一份实现（SpeedChart::plotPerfTraces），结果窗口点开某一项
+    // 走的是同一个函数，两处画出来必然一样。
     m_chartStack->setCurrentIndex(1);
-    m_chart->clear();
-    m_chart->setTimeAxis(FioConfig::perfRuntimeSeconds());
-    QColor readColor;
-    QColor writeColor;
-    m_chart->setDirections(true, true);
-    perfItemColors(item, &readColor, &writeColor);
-
-    const int count = qMax(readTrace.size(), writeTrace.size());
-    for (int i = 0; i < count; ++i) {
-        const bool hasRead = i < readTrace.size();
-        const bool hasWrite = i < writeTrace.size();
-        m_chart->appendSample(hasRead ? readTrace.at(i).x() : 0.0, hasRead,
-                              hasRead ? readTrace.at(i).y() : 0.0,
-                              hasWrite ? writeTrace.at(i).x() : 0.0, hasWrite,
-                              hasWrite ? writeTrace.at(i).y() : 0.0);
-    }
-
-    // 颜色随时可设：refreshPlot 只灌数据，不碰画笔
-    m_chart->setSeriesColors(readColor, writeColor);
+    SpeedChart::plotPerfTraces(readTrace, writeTrace,
+                               double(FioConfig::perfRuntimeSeconds()), item, m_chart,
+                               m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
+                                                              : SpeedChart::Density::High);
 
     statusBar()->showMessage(kTraceShownTip.arg(FioConfig::perfItemName(item)));
 }
@@ -3606,6 +3581,10 @@ void MainWindow::finishPerfRun()
     // 需求：性能测试结束后默认删除测试文件（终止时上面已经删过，这里只在正常结束时删）
     if (!m_stopRequested)
         deletePerfFiles();
+
+    // 把这一轮的结果落到 m_perfResults 里再收尾：不落的话，只要用户不切盘，
+    // 结果就只活在界面控件里，切一下测试模式再切回来图表就"没有数据"了。
+    commitPerfResultsToCurrentTarget();
 
     finishWholeTest();
 }
@@ -3636,15 +3615,12 @@ void MainWindow::finishWholeTest()
 
     const bool anyBad = std::any_of(m_outcomes.cbegin(), m_outcomes.cend(),
                                     [](const PhaseOutcome &o) {
-                                        if (!o.result.warnings.isEmpty())
-                                            return true;
-                                        // jobErrors 里存的是 fio 的 err= 数值，
-                                        // "列表非空"不等于"有错"，err=0 是正常的。
-                                        for (int err : o.result.jobErrors) {
-                                            if (err != 0)
-                                                return true;
-                                        }
-                                        return false;
+                                        // "这次跑得好不好"的口径只有一份
+                                        // （FioResult::hasProblems）：它认 warnings、
+                                        // err != 0，**以及校验失败**。
+                                        // 以前这里自己写了一遍、漏了校验失败，
+                                        // 于是坏盘的结论行可能写成"合格"。
+                                        return o.result.hasProblems();
                                     });
 
     QStringList summary;
@@ -4013,6 +3989,79 @@ void MainWindow::writeSelfTestReport()
                              && FioConfig::engineRequiresBufferedIo(QStringLiteral("sync"))
                              && !FioConfig::engineRequiresBufferedIo(QStringLiteral("windowsaio"));
 
+    // 裸设备路径必须被 validate() **真的拒掉**。
+    // 只断言 looksLikeRawDevice() 算得对是不够的 —— 它以前只被这句断言调用，
+    // 生产路径上一次都没用上，等于自检给了一个"护栏在工作"的假象。
+    bool rawRejectGuard = true;
+    const QStringList rawProbes = {
+        QStringLiteral("\\\\.\\PhysicalDrive0"),
+        QStringLiteral("/dev/sda"),
+        QStringLiteral("/dev/nvme0n1"),
+    };
+    for (const QString &probe : rawProbes) {
+        FioConfig probeCfg;
+        probeCfg.targetDir = probe;
+        QString probeError;
+        if (probeCfg.validate(&probeError) || probeError.isEmpty())
+            rawRejectGuard = false;
+    }
+
+    // 校验失败必须让"这次跑得好不好"变成"有问题"。
+    // 这是本工具唯一存在的理由：一块已经坏了的盘绝不能被判成合格。
+    // 特别要盖住"只有计数、没有 warnings / jobErrors"那一种（fio 短措辞）。
+    bool verifyVerdictGuard = false;
+    {
+        FioResult clean;
+        clean.exitCode = 0;
+        FioResult counted = clean;
+        counted.verifyFailures = 1;
+        FioResult shortWording = clean;
+        shortWording.verifyFailures = 3;
+        shortWording.firstVerifyError = QStringLiteral("Verify error at file testfile_0, offset 4096");
+        verifyVerdictGuard = clean.isClean() && !clean.hasProblems()
+                             && !counted.isClean() && counted.hasProblems()
+                             && !shortWording.isClean() && shortWording.hasProblems();
+    }
+
+    // 测试文件名的判据 + 扫描结果的分类：清理路径按这两条决定删什么。
+    // 光验 isTestFileName() 是不够的 —— 真正删文件的是"分类"这一步，
+    // 而把"没匹配上测试文件"当成"那就是状态文件"会让任意第三方文件被删掉
+    // （实测：放在测试目录里的 testfile_backup.dat 就是这么被删的）。
+    bool testFileNameGuard =
+        isTestFileName(QStringLiteral("testfile_0"))
+        && isTestFileName(QStringLiteral("testfile_17"))
+        && !isTestFileName(QStringLiteral("testfile_"))
+        && !isTestFileName(QStringLiteral("testfile_backup.dat"))
+        && !isTestFileName(QStringLiteral("local-diskcheck-0-verify.state"))
+        && !isTestFileName(QStringLiteral("my_testfile_1"));
+    {
+        QTemporaryDir scanDir;
+        if (scanDir.isValid()) {
+            const auto touch = [&scanDir](const QString &name) {
+                QFile f(QDir(scanDir.path()).absoluteFilePath(name));
+                if (f.open(QIODevice::WriteOnly))
+                    f.write("x");
+            };
+            touch(QStringLiteral("testfile_0"));
+            touch(QStringLiteral("testfile_12"));
+            touch(QStringLiteral("testfile_backup.dat"));
+            touch(QStringLiteral("local-diskcheck-0-verify.state"));
+            touch(QStringLiteral("unrelated.txt"));
+
+            const TestFileSet scanned = scanTestFiles(scanDir.path());
+            testFileNameGuard =
+                testFileNameGuard
+                && scanned.count == 2
+                && scanned.names.contains(QStringLiteral("testfile_0"))
+                && scanned.names.contains(QStringLiteral("testfile_12"))
+                && scanned.stateNames.size() == 1
+                && scanned.stateNames.first() == QStringLiteral("local-diskcheck-0-verify.state")
+                && !scanned.names.contains(QStringLiteral("testfile_backup.dat"));
+        } else {
+            testFileNameGuard = false;
+        }
+    }
+
     // 文件规划：每个文件都必须 ≤ 2 GiB，且总量不能超过目标
     bool planGuard = true;
     const struct { quint64 free; } probes[] = {
@@ -4129,7 +4178,8 @@ void MainWindow::writeSelfTestReport()
 
     const bool pass = dataGuard && noProblems && rawDeviceGuard && engineGuard
                       && planGuard && iconGuard && fileGuard && stepGuard
-                      && m_exclusiveGuardOk;
+                      && m_exclusiveGuardOk && rawRejectGuard && verifyVerdictGuard
+                      && testFileNameGuard;
 
     // 报告先攒在一个 QString 里，最后再落盘 + 打印。
     //
@@ -4258,7 +4308,13 @@ void MainWindow::writeSelfTestReport()
             << (m_observedStates.isEmpty() ? kTextNotObserved
                                            : m_observedStates.join(kTextArrow)) << "\n";
         out << kReportGuardRawDevice << (rawDeviceGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardRawReject << (rawRejectGuard ? "PASS" : "FAIL")
+            << QStringLiteral("（validate() 会拒掉 \\\\.\\PhysicalDrive0 与 /dev/sdX）") << "\n";
         out << kReportGuardSyncEngine << (engineGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardVerifyVerdict << (verifyVerdictGuard ? "PASS" : "FAIL")
+            << QStringLiteral("（校验失败 >0 时 isClean() 必须是 false）") << "\n";
+        out << kReportGuardTestFileName << (testFileNameGuard ? "PASS" : "FAIL")
+            << QStringLiteral("（只认 testfile_<数字>，不碰别的同名文件）") << "\n";
         out << kReportGuardWindowIcon << (iconGuard ? "PASS" : "FAIL") << "\n";
         out << kReportGuardAutoStep << (stepGuard ? "PASS" : "FAIL") << "\n";
         for (const QString &line : stepLines)
@@ -4345,8 +4401,17 @@ void MainWindow::writeSelfTestReport()
             if (m_loadedRunDataValid) {
                 const bool perf = (m_loadedRunData.mode == RunData::Mode::Performance);
                 const QVector<int> present = m_loadedRunData.perfItemsPresent();
-                // 可靠性数据不应该被判成性能；性能数据必须能分出四项
-                const bool modeOk = perf ? (present.size() == 4) : present.isEmpty();
+                // 可靠性数据不应该被判成性能；性能数据必须能分出四项。
+                //
+                // 注意判据**不能**写成"可靠性必须一项都没有"：当前版本写 CSV 时
+                // 可靠性那一段的 item/pass 是**固定 0,0**（列必须写满才能被读回来，
+                // 见 MainWindow::saveRunDataTo），所以 perfItemsPresent() 必然返回
+                // {0} 一个元素 —— 按"必须为空"去判的话，这条断言对任何
+                // 本版本存的可靠性文件都永远 FAIL（实测就是这么发现的）。
+                const bool modeOk =
+                    perf ? (present.size() == 4)
+                         : (present.size() <= 1
+                            && (present.isEmpty() || present.first() == 0));
                 out << kReportLoadedModeGuard << (modeOk ? "PASS" : "FAIL")
                     << (perf ? kModeNamePerformance : kModeNameReliability)
                     << kReportLoadedItemsFmt.arg(present.size()) << "\n";

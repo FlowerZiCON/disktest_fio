@@ -18,6 +18,9 @@
 #include <QVector>
 #include <QWidget>
 
+#include "fioconfig.h"   // 测试项与颜色规则（画性能曲线要用）
+#include "rundata.h"
+
 // VerifyBandChartView 继承自 QChartView，这里必须要完整定义（不能只前置声明）
 #include <QtCharts/QChartView>
 
@@ -84,8 +87,6 @@ public:
     void clear();
 
     void setDirections(bool showRead, bool showWrite);
-    bool showsRead() const { return m_showRead; }
-    bool showsWrite() const { return m_showWrite; }
 
     void      setPlotStyle(PlotStyle style);
     PlotStyle plotStyle() const { return m_style; }
@@ -121,6 +122,29 @@ public:
 
     /// 等间隔取点（散点用）。首末点一定保留。
     static QList<QPointF> reduceEvenly(const QList<QPointF> &src, int target);
+
+    // ---- 把一份结果画进图表：**两个渲染入口只在这里实现一次** ----
+    //
+    // 主窗口（加载历史数据）和结果窗口以前各写了一遍"定轴 → 设方向 → 逐点
+    // appendSample → finishSamples"，连颜色规则和收尾刷新都是两份，
+    // 两条路径画出来的东西可以不一致（也就真的不一致过）。
+    // 现在两边都调下面这两个函数，密度由调用方给（它属于用户的界面状态）。
+
+    /// 画**整份结果**：轴按数据自身的模式定（可靠性=容量轴，性能=时间轴），
+    /// 读写两条线的颜色按"第一个有数据的测试项"取（可靠性用默认红/蓝）。
+    static void plotRunData(const RunData &data, SpeedChart *chart, Density density);
+
+    /// 画**某一个测试项的读写两条线**：横轴固定 0~runtimeSeconds 秒，
+    /// 两趟的采样叠在同一段时间上。颜色按测试项取（顺序项红/蓝、随机项黄/绿）。
+    static void plotPerfItem(const RunData &data, SpeedChart *chart, int itemIndex,
+                             Density density);
+
+    /// 画**一对已经算好的逐点轨迹**（主窗口实时采集攒下来的那一份，
+    /// 没有 RunData 可给）。轴同样按时间定。
+    static void plotPerfTraces(const QVector<QPointF> &readTrace,
+                               const QVector<QPointF> &writeTrace,
+                               double runtimeSeconds, FioConfig::PerfItem item,
+                               SpeedChart *chart, Density density);
 
     /// 横轴用什么单位：可靠性测试用"已处理容量"，性能测试用"时间"。
     enum class AxisMode { Capacity, Time };
@@ -171,7 +195,12 @@ public:
     /// 线会被裁到坐标区内，所以永远"不高出纵轴范围"。
     void addVerifyMarker(double x);
     void clearVerifyMarkers();
-    int  verifyMarkerCount() const;
+    /// 色带数量的上限（addVerifyMarker 到顶之后就不再收）。
+    static int maxVerifyMarkers() { return kMaxVerifyMarkers; }
+    /// 因为超过上限而被丢弃的标记数。**不是 0 就说明图上画得比实际发现的少**，
+    /// 调用方要据此提示用户一句 —— 否则"告警说 900 处、图上只有稀稀几条"
+    /// 会被理解成"只有那几处坏"。
+    int  droppedVerifyMarkerCount() const { return m_droppedMarkers; }
 
     int    sampleCount() const { return m_history.size(); }
     /// 折线序列里实际画了多少个点（高密度=全部，低密度=抽稀后）。
@@ -213,6 +242,8 @@ private:
     QValueAxis          *m_axisY        = nullptr;
     /// 校验失败位置的横坐标。实际绘制在 VerifyBandChartView::paintEvent 里。
     QVector<double>      m_markerXs;
+    /// 因超出上限被丢掉的标记数（见 droppedVerifyMarkerCount）
+    int                  m_droppedMarkers = 0;
 
     QVector<Sample> m_history;
     /// 批量刷新的定时器（单次触发）。攒点的代价是刷新有一点点延迟，

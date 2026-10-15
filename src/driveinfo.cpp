@@ -164,12 +164,11 @@ void fillFileSystemFacts(FileSystemEntry *entry)
         entry->unavailableReason = kFsReadOnly;
         return;
     }
-    if (!isNetworkFileSystem(entry->fileSystem)) {
-        entry->suggestedDir = suggestTestDir(entry->mountPoint, &entry->unavailableReason);
-    } else {
-        // 网络文件系统照样能测，但测的是网络不是盘，所以照给目录、由界面去提醒
-        entry->suggestedDir = suggestTestDir(entry->mountPoint, &entry->unavailableReason);
-    }
+    // 网络文件系统（nfs / cifs）在这一层是**照给目录**的：它照样能测，
+    // 只是测的是网络不是盘，界面会另外挂一句提醒（见 kFsNetworkWarning）。
+    // 以前这里写成 if (!isNetwork) {...} else {...}，两个分支内容一模一样，
+    // 纯属噪音（也让人以为两种情况会走不同的逻辑）。
+    entry->suggestedDir = suggestTestDir(entry->mountPoint, &entry->unavailableReason);
 }
 
 QList<DiskEntry> disksFromWindowsVolumes(QStringList *ignored)
@@ -202,6 +201,7 @@ QList<DiskEntry> disksFromWindowsVolumes(QStringList *ignored)
         // （建目录报 ERROR_INVALID_OWNER / 拒绝访问），提权之后又消失，
         // 同一个东西两种表现，怎么解释都是 bug。
         QString why;
+        int diskNumber = -1;
         {
             const QString root = rootPath.left(2) + QLatin1Char('\\');   // "X:\"
             const UINT driveType =
@@ -212,8 +212,12 @@ QList<DiskEntry> disksFromWindowsVolumes(QStringList *ignored)
                 why = kVolumeWhyRamdisk;
             } else if (driveType == DRIVE_NO_ROOT_DIR || driveType == DRIVE_UNKNOWN) {
                 why = kVolumeWhyNoRoot;
-            } else if (volumeDiskNumber(rootPath) < 0) {
-                why = kVolumeWhyNoPhysicalDisk;
+            } else {
+                // **只问一次**：volumeDiskNumber() 是 CreateFile + DeviceIoControl
+                // 两次内核往返。以前上面问一次、下面又问一次，每个卷白跑一遍。
+                diskNumber = volumeDiskNumber(rootPath);
+                if (diskNumber < 0)
+                    why = kVolumeWhyNoPhysicalDisk;
             }
         }
         if (!why.isEmpty()) {
@@ -222,14 +226,12 @@ QList<DiskEntry> disksFromWindowsVolumes(QStringList *ignored)
             continue;
         }
 
-        const int diskNumber = volumeDiskNumber(rootPath);
-
+        // 到这里 diskNumber 一定 >= 0：为负的那些上面已经 continue 掉了。
+        // （以前这里还留着一个 ?: 兜底，那一支永远走不到。）
         int index = diskNumbers.indexOf(diskNumber);
         if (index < 0) {
             DiskEntry disk;
-            disk.kernelName = diskNumber >= 0
-                                  ? QStringLiteral("PhysicalDrive%1").arg(diskNumber)
-                                  : kTextUnknownDevice;
+            disk.kernelName = QStringLiteral("PhysicalDrive%1").arg(diskNumber);
             disk.model = physicalDiskModel(diskNumber);
             disks.append(disk);
             diskNumbers.append(diskNumber);
@@ -569,7 +571,7 @@ QList<DiskEntry> enumerateDisks(QStringList *ignored)
                 QStringList{QStringLiteral("-J"), QStringLiteral("-b"),
                             QStringLiteral("-o"),
                             QStringLiteral("NAME,TYPE,SIZE,MODEL,VENDOR,FSTYPE,"
-                                           "MOUNTPOINT,LABEL,RO,RM")});
+                                           "MOUNTPOINT,LABEL,RO")});
     if (lsblk.waitForStarted(2000) && lsblk.waitForFinished(4000)) {
         QList<DiskEntry> disks =
             disksFromLsblk(QString::fromUtf8(lsblk.readAllStandardOutput()), ignored);
@@ -791,6 +793,27 @@ bool supportsDirectIo(const QString &folder, QString *error)
 #endif
 }
 
+QString testFilePrefix()
+{
+    return QStringLiteral("testfile_");
+}
+
+bool isTestFileName(const QString &name)
+{
+    if (!name.startsWith(testFilePrefix()))
+        return false;
+    const QString suffix = name.mid(testFilePrefix().size());
+    if (suffix.isEmpty())
+        return false;
+    // 纯数字后缀（job 里是 filename_format=testfile_$filenum）。
+    // 按整数解析来判断，不依赖 glob 的字符类支持。
+    for (const QChar c : suffix) {
+        if (!c.isDigit())
+            return false;
+    }
+    return true;
+}
+
 TestFileSet scanTestFiles(const QString &folder)
 {
     TestFileSet set;
@@ -802,14 +825,30 @@ TestFileSet scanTestFiles(const QString &folder)
         return set;
 
     const QFileInfoList entries = dir.entryInfoList(
-        QStringList{QStringLiteral("testfile_*")},
+        QStringList{QStringLiteral("testfile_*"), QStringLiteral("*.state")},
         QDir::Files | QDir::NoSymLinks, QDir::Name);
 
     for (const QFileInfo &info : entries) {
-        set.names << info.fileName();
-        set.sizes << info.size();
-        set.totalBytes += info.size();
-        ++set.count;
+        const QString name = info.fileName();
+        if (isTestFileName(name)) {
+            set.names << name;
+            set.sizes << info.size();
+            set.totalBytes += info.size();
+            ++set.count;
+            continue;
+        }
+        // fio 的校验状态文件：实测叫 local-<job>-<n>-verify.state，
+        // 和 testfile_* 完全不沾边，但确实落在测试目录里，清理时要删。
+        //
+        // 判据必须是"以 .state 结尾"这一条。**别把"没匹配上测试文件"当成
+        // "那就是状态文件"**：那样任何第三个文件（testfile_backup.dat、
+        // 用户的说明文件…）都会被归进"要删的"那一类。实测踩过这个坑：
+        // 清理路径会照着这个分类删文件。
+        if (name.endsWith(QStringLiteral(".state"), Qt::CaseInsensitive)) {
+            set.stateNames << name;
+            set.stateBytes += info.size();
+        }
+        // 其它文件一律**不归类、不动**：既不是我们生成的，也不是 fio 留下的。
     }
     return set;
 }

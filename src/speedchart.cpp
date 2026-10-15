@@ -272,8 +272,12 @@ void SpeedChart::addVerifyMarker(double x)
     // 只收数据，不做去重：像素级的合并留到渲染时按**最终的**横轴范围算
     // （见 VerifyBandChartView::paintEvent）。这里若按当前轴范围去重，
     // 实时测试时轴范围还没定下来，会合并过头，和回看图对不上。
-    if (m_markerXs.size() >= kMaxVerifyMarkers)
+    if (m_markerXs.size() >= kMaxVerifyMarkers) {
+        // 超上限不再收，但**记下来**：调用方要能说出"图上少画了多少处"。
+        // 静默丢弃会让"告警说 900 处、图上只有几条"看起来像只有几处坏。
+        ++m_droppedMarkers;
         return;
+    }
     m_markerXs << x;
     refreshVerifyMarkers();
 }
@@ -281,13 +285,9 @@ void SpeedChart::addVerifyMarker(double x)
 void SpeedChart::clearVerifyMarkers()
 {
     m_markerXs.clear();
+    m_droppedMarkers = 0;
     if (m_view)
         m_view->setBands(m_markerXs, 0.0, 1.0);
-}
-
-int SpeedChart::verifyMarkerCount() const
-{
-    return m_markerXs.size();
 }
 
 void SpeedChart::refreshVerifyMarkers()
@@ -337,6 +337,113 @@ void SpeedChart::setDensity(Density density)
     m_density = density;
     // 密度一改就要重画（高密度=全画，低密度=抽稀）
     refreshPlot();
+}
+
+void SpeedChart::plotRunData(const RunData &data, SpeedChart *chart, Density density)
+{
+    if (!chart)
+        return;
+
+    const bool perf = (data.mode == RunData::Mode::Performance);
+    const bool plotRead = std::any_of(data.flags.cbegin(), data.flags.cend(),
+                                      [](quint8 f) { return (f & 1) != 0; });
+    const bool plotWrite = std::any_of(data.flags.cbegin(), data.flags.cend(),
+                                       [](quint8 f) { return (f & 2) != 0; });
+
+    chart->clear();
+    chart->setPlotStyle(data.param(QStringLiteral("plot_style")) == QLatin1String("scatter")
+                            ? PlotStyle::Scatter
+                            : PlotStyle::Line);
+    if (perf) {
+        // 性能数据的"容量列"里放的是秒，轴要按时间画；具体多少秒取文件里记的值
+        chart->setTimeAxis(data.perfRuntimeSeconds());
+    } else {
+        chart->setCapacityAxis(data.axisMaxGiB());
+    }
+    chart->setDirections(plotRead, plotWrite);
+    chart->setDensity(density);
+
+    for (int i = 0; i < data.sampleCount(); ++i) {
+        const quint8 f = data.flags.value(i, 0);
+        chart->appendSample(data.readX.value(i, 0.0), (f & 1) != 0,
+                            data.readV.value(i, 0.0),
+                            data.writeX.value(i, 0.0), (f & 2) != 0,
+                            data.writeV.value(i, 0.0));
+    }
+
+    if (perf) {
+        // 性能 CSV 是多场次叠在一份文件里的，颜色按"第一个有数据的项"来定。
+        // 可靠性数据不在这里换色（就用默认的红/蓝）。
+        const QVector<RunData::Trace> itemTraces = data.perfTraces();
+        for (int i = 0; i < itemTraces.size(); ++i) {
+            if (!itemTraces.at(i).hasRead() && !itemTraces.at(i).hasWrite())
+                continue;
+            QColor readColor;
+            QColor writeColor;
+            FioConfig::perfItemColors(FioConfig::allPerfItems().value(i),
+                                      &readColor, &writeColor);
+            chart->setSeriesColors(readColor, writeColor);
+            break;
+        }
+    }
+
+    // 点加完了，重建一次折线，保证**末点一定画出来**：
+    // 抽稀是"每隔 step 个点保留一个"，末点落在哪一格是偶然的，
+    // 不是 step 的整数倍时就被抽掉，曲线末端够不到横轴右边缘。
+    chart->finishSamples();
+}
+
+void SpeedChart::plotPerfItem(const RunData &data, SpeedChart *chart, int itemIndex,
+                              Density density)
+{
+    const QVector<FioConfig::PerfItem> all = FioConfig::allPerfItems();
+    if (!chart || itemIndex < 0 || itemIndex >= all.size())
+        return;
+
+    // 按值取：perfTraces() 返回的是临时对象，用 const& 接会立刻悬空。
+    const QVector<RunData::Trace> traces = data.perfTraces();
+    if (itemIndex >= traces.size())
+        return;
+    const RunData::Trace trace = traces.at(itemIndex);
+
+    plotPerfTraces(trace.read, trace.write, data.perfRuntimeSeconds(),
+                   all.at(itemIndex), chart, density);
+}
+
+void SpeedChart::plotPerfTraces(const QVector<QPointF> &readTrace,
+                                const QVector<QPointF> &writeTrace,
+                                double runtimeSeconds, FioConfig::PerfItem item,
+                                SpeedChart *chart, Density density)
+{
+    if (!chart)
+        return;
+
+    chart->clear();
+    // 横轴固定，两趟的采样叠在同一段时间上
+    chart->setTimeAxis(runtimeSeconds);
+    chart->setDensity(density);
+    chart->setDirections(!readTrace.isEmpty(), !writeTrace.isEmpty());
+
+    // 逐点对齐着加：两趟的点数不一定严格相等（末点会被补一个收尾点），
+    // 索引越界的那一侧按"这一拍没有该方向的数据"处理，而不是造一个 0。
+    const int count = qMax(readTrace.size(), writeTrace.size());
+    for (int i = 0; i < count; ++i) {
+        const bool hasRead = i < readTrace.size();
+        const bool hasWrite = i < writeTrace.size();
+        chart->appendSample(hasRead ? readTrace.at(i).x() : 0.0, hasRead,
+                            hasRead ? readTrace.at(i).y() : 0.0,
+                            hasWrite ? writeTrace.at(i).x() : 0.0, hasWrite,
+                            hasWrite ? writeTrace.at(i).y() : 0.0);
+    }
+
+    QColor readColor;
+    QColor writeColor;
+    FioConfig::perfItemColors(item, &readColor, &writeColor);
+    // 颜色随时可设：refreshPlot 只灌数据，不碰画笔
+    chart->setSeriesColors(readColor, writeColor);
+
+    // 末点必须画出来：每一趟的末尾是收尾补点，曲线不能停在右边缘前一格。
+    chart->finishSamples();
 }
 
 int SpeedChart::targetPointCount() const

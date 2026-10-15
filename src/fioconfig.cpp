@@ -44,15 +44,6 @@ QString FioConfig::perfItemKey(PerfItem item)
     return QStringLiteral("seq_q8t1");
 }
 
-FioConfig::PerfItem FioConfig::perfItemFromKey(const QString &key)
-{
-    for (PerfItem item : allPerfItems()) {
-        if (perfItemKey(item) == key)
-            return item;
-    }
-    return PerfItem::SeqQ8T1;
-}
-
 int FioConfig::perfItemIodepth(PerfItem item)
 {
     switch (item) {
@@ -72,6 +63,20 @@ bool FioConfig::perfItemIsRandom(PerfItem item)
 QString FioConfig::perfItemBlockSize(PerfItem item)
 {
     return perfItemIsRandom(item) ? QStringLiteral("4k") : QStringLiteral("4m");
+}
+
+void FioConfig::perfItemColors(PerfItem item, QColor *readColor, QColor *writeColor)
+{
+    // 顺序项红/蓝，随机项黄/绿。**只按测试项分**，不按"读取/写入"分——
+    // 否则点顺序项的格子会画成黄绿，和列表里看到的对不上。
+    // 主窗口和结果窗口都调这里，只有这一份规则。
+    if (perfItemIsRandom(item)) {
+        *readColor = QColor(0xf0, 0xc0, 0x00);
+        *writeColor = QColor(0x2e, 0xaa, 0x4a);
+    } else {
+        *readColor = QColor(220, 30, 30);
+        *writeColor = QColor(30, 70, 220);
+    }
 }
 
 QVector<qint64> FioConfig::perfSizeChoices()
@@ -201,6 +206,20 @@ void FioConfig::setIoEngine(const QString &engine)
     g_ioEngineOverride = engine.trimmed().toLower();
 }
 
+bool FioConfig::directIo()
+{
+#ifdef Q_OS_WIN
+    // 只有 Windows 上"同步引擎 + direct=1"是非法组合（见 engineRequiresBufferedIo）。
+    // 探测到的引擎万一是 psync（fio 构建没带 windowsaio），继续写 direct=1 会让
+    // 整个测试以一个看不懂的 "Operation not supported" 收场；退回缓冲 I/O 并把
+    // 后果说清楚，比让用户对着一张报错猜要好。
+    return !engineRequiresBufferedIo(ioEngine());
+#else
+    // Linux 上 O_DIRECT 是文件系统层面的能力，和引擎无关，恒用直接 I/O。
+    return true;
+#endif
+}
+
 QString FioConfig::testFolder() const
 {
     // 目标是一个**目录**，测试文件建在它下面的 ml_disktest 里。
@@ -211,11 +230,6 @@ QString FioConfig::testFolder() const
     if (!dir.endsWith(QLatin1Char('/')) && !dir.endsWith(QLatin1Char('\\')))
         dir += QLatin1Char('/');
     return QDir::cleanPath(dir + folderName());
-}
-
-QString FioConfig::testFilePattern() const
-{
-    return fileBaseName() + QStringLiteral("_*");
 }
 
 qint64 FioConfig::reserveBytes(quint64 volumeTotal)
@@ -275,7 +289,7 @@ QString FioConfig::perfJobFileText(PerfItem item, bool writePass, int fileCount,
     QStringList lines;
     lines << QStringLiteral("[global]");
     lines << QStringLiteral("ioengine=%1").arg(ioEngine());
-    lines << QStringLiteral("direct=1");
+    lines << QStringLiteral("direct=%1").arg(directIo() ? 1 : 0);
     lines << QStringLiteral("group_reporting=1");
     lines << QStringLiteral("bs=%1").arg(perfItemBlockSize(item));
     lines << QStringLiteral("iodepth=%1").arg(perfItemIodepth(item));
@@ -309,7 +323,7 @@ QString FioConfig::writeJobFileText(const FilePlan &plan) const
     QStringList lines;
     lines << QStringLiteral("[global]");
     lines << QStringLiteral("ioengine=%1").arg(ioEngine());
-    lines << QStringLiteral("direct=1");   // 固定直接 I/O
+    lines << QStringLiteral("direct=%1").arg(directIo() ? 1 : 0);   // 固定直接 I/O（引擎不支持时才退回缓冲）
     lines << QStringLiteral("group_reporting=1");
     lines << QStringLiteral("bs=%1").arg(blockSize());
     lines << QStringLiteral("iodepth=%1").arg(iodepth);
@@ -337,7 +351,7 @@ QString FioConfig::readJobFileText(int fileCount, qint64 totalBytes) const
     QStringList lines;
     lines << QStringLiteral("[global]");
     lines << QStringLiteral("ioengine=%1").arg(ioEngine());
-    lines << QStringLiteral("direct=1");   // 固定直接 I/O
+    lines << QStringLiteral("direct=%1").arg(directIo() ? 1 : 0);   // 固定直接 I/O（引擎不支持时才退回缓冲）
     lines << QStringLiteral("group_reporting=1");
     lines << QStringLiteral("bs=%1").arg(blockSize());
     lines << QStringLiteral("iodepth=%1").arg(iodepth);
@@ -406,6 +420,15 @@ bool FioConfig::validate(QString *error) const
 
     if (targetDir.trimmed().isEmpty())
         return fail(kErrNeedDrive);
+
+    // 裸设备 / 物理磁盘路径（\\.\PhysicalDrive0、/dev/sda…）一律拒绝。
+    //
+    // **这里是真正的执法点**：`looksLikeRawDevice()` 以前只被自检里的那句断言
+    // 调用过，生产路径上一次都没用上 —— 实际挡住裸设备的是后面那条
+    // "目标必须是个目录"，那是巧合而不是设计（一条形如 /dev/disk/by-id/... 的
+    // 目录符号链接就可能绕过它）。既然 README 里写了"做了硬拦截"，就得真的拦。
+    if (looksLikeRawDevice(targetDir))
+        return fail(kErrTargetIsRawDevice.arg(targetDir));
 
     const QString folder = testFolder();
     if (folder.isEmpty())

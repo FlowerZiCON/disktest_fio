@@ -61,8 +61,11 @@ private:
     void rebuildPerfChart(int item);
     /// 老文件没有分项信息时，画一条合起来的读/写曲线。
     void rebuildPerfCombinedChart();
-    /// 按测试项类型取读/写两条线的颜色（顺序项红/蓝，随机项黄/绿）。
-    static void perfItemColors(int itemIndex, QColor *readColor, QColor *writeColor);
+
+    /// 结果表里有几个格子（= 性能测试项的数量）。
+    /// **必须是这一个常量**：以前"填格子"的循环走 allPerfItems().size()、
+    /// 而"设满量程"的循环写死 4，两个数一旦不一致就是越界写。
+    static constexpr int kPerfCellCount = 4;
 
     RunData m_data;
     /// 解析出来的四项轨迹，构造时算一次就够：m_data 之后不再变，
@@ -77,6 +80,6 @@ private:
     /// 性能数据：当前单独显示的测试项下标（-1 = 合起来的曲线）。
     int m_selectedItem = -1;
     /// 结果表里的大号数字格子（每项：读取、写入）。
-    PerfCell *m_readCells[4]  = {nullptr, nullptr, nullptr, nullptr};
-    PerfCell *m_writeCells[4] = {nullptr, nullptr, nullptr, nullptr};
+    PerfCell *m_readCells[kPerfCellCount]  = {};
+    PerfCell *m_writeCells[kPerfCellCount] = {};
 };
