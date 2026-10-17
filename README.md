@@ -34,8 +34,8 @@
 
 ## 快速开始
 
-1. **下载发布包**，解压到任意目录（路径带中文也没问题）。
-2. 双击 **`disktest.exe`**。
+1. **下载发布包**：安装版直接运行 `disktest-<版本>-setup.exe`；绿色版解压到任意目录（路径带中文也没问题）。
+2. 双击 **`disktest.exe`**（安装版也可以从开始菜单启动）。
 3. 如果你的电脑没有安装Qt运行时和fio，那你需要下载全量包，如果环境满足可以只下载本体。
 4. 在左侧「选择磁盘」列表里展开一块盘，**单击选中它下面的那个分区**（文件系统）。
    列表里灰色的行表示测不了（只读 / 未挂载 / 没有可写目录）。
@@ -150,6 +150,24 @@ build.bat package
 ```
 
 生成的 `build\dist` 整个目录拷到目标机器双击即可运行。`build.bat help` 有全部用法。
+想要**可安装的 `setup.exe`**（开始菜单快捷方式、卸载程序，可选「所有用户 / 仅当前用户」）：
+
+```bat
+build.bat installer
+```
+
+产物在 `build\installer\disktest-<版本>-setup.exe`，需要 **Inno Setup 6**：
+
+```bat
+winget install --id JRSoftware.InnoSetup --exact
+```
+
+安装包的内容就是 `build\dist`（exe + Qt 运行库 + fio + 许可证），所以目标机器同样
+不需要装 Qt 或 VC++ 运行库。静默安装（批量部署用）：
+
+```bat
+disktest-3.0.6-setup.exe /VERYSILENT /CURRENTUSER /DIR="D:\Tools\Disktest"
+```
 
 **Linux**：
 

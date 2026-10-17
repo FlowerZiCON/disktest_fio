@@ -340,6 +340,15 @@
     `QMessageBox::about()`：后者加不了自定义按钮。
 - 版本号只有 **`CMakeLists.txt` 里 `project(... VERSION x.y.z)` 一个来源**，
   编译期以 `DISKTEST_VERSION` 宏传进代码，标题栏和「关于」都取自它，改一处即可。
+- 同一个版本号也编进 **exe 的版本资源**（资源管理器右键 → 属性 → 详细信息）：
+  产品名、文件说明、公司、版权、平台标识在 `CMakeLists.txt` 顶部的「程序元信息」里，
+  由 `resources/app.rc.in` 模板在 configure 时生成 `build/app.rc` 交给 rc.exe。
+  所以属性页、标题栏、「关于」三处不会各说一套；`installer\disktest.iss` 的
+  `VersionInfoProductVersion` 也只从同一个 `project(... VERSION)` 读。
+  - 两个**不能省**的细节（都不是可选的风格问题，去掉就出不来或显示成空）：
+    生成的 `.rc` 必须带 **UTF-8 BOM**（否则 rc.exe 按 936 代码页读中文，报
+    `error C2001: 字符串字面量中的换行符`）；版本资源的名字必须是数字 **`1`**
+    （写成 `VS_VERSION_INFO` 时 `GetFileVersionInfoSizeW` 返回 0，属性页一片空白）。
 - 作者与联系方式是 `src/uitext.h` 顶部的 `kAuthor` / `kContact`，
   **默认是占位符，请改成你自己的**。
 
@@ -722,6 +731,7 @@ fio 默认在**第一次**校验失败时就结束这个 job。对可靠性测�
 build.bat                                    全量重建（先删 build\ 再配置编译）
 build.bat clean                              只删 build\，不配置不编译
 build.bat package                            全量重建 + 打包到 build\dist
+build.bat installer                          全量重建 + 打包 + 编译安装包 setup.exe
 build.bat run                                全量重建后启动程序
 build.bat selftest /target G: /filllimit 3000  全量重建 + 跑一轮无人值守自检
 build.bat help                               全部用法
@@ -823,6 +833,66 @@ Qt 是 `/MD` 构建的，所以本程序必须跟着动态链接 CRT（不能静
 自足性验证：把 `dist` 拷到工作区外的临时目录，用
 `PATH=C:\WINDOWS\system32;C:\WINDOWS`（完全不含 Qt）启动，跑完整测试 PASS；
 并用 `dumpbin /dependents` 扫过包里全部二进制，被引用的 MSVC 运行库**缺失 0 个**。
+### 做安装包（Inno Setup 6）
+
+`build.bat package` 产出的是绿色目录，`build.bat installer` 再把它包成一个可安装的 `setup.exe`：
+
+```bat
+build.bat installer           全量重建 + package + 编译安装包
+```
+
+```
+build\installer\disktest-3.0.6-setup.exe     约 18 MB
+build\dist\                                  安装包的内容就是它，逐文件一致
+```
+
+编译器是 Inno Setup 的 `ISCC.exe`，一条命令装上：
+
+```bat
+winget install --id JRSoftware.InnoSetup --exact
+```
+
+`tools\make-installer.ps1` 自己找 `ISCC.exe`（PATH → `%LOCALAPPDATA%\Programs\Inno Setup 6` →
+`Program Files`），版本号从 `CMakeLists.txt` 的 `project(... VERSION)` 读，不在别处写死。
+也可以手工编译（注意 `/D` 要写在脚本路径前面）：
+
+```bat
+"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=3.0.6 installer\disktest.iss
+```
+
+安装脚本 `installer\disktest.iss` 做的事：
+
+| 做什么 | 为什么 |
+| --- | --- |
+| `build\dist\*` 原样装进 `{app}`（只排除 `vc_redist.x64.exe`） | 装出来的目录和绿色版基本一致：Qt DLL、平台插件、fio、许可证、README 全在。`vc_redist` 是 windeployqt 顺手拷进来的 18 MB 运行库*安装程序*，而 CRT 的 DLL 已经跟着 `{app}` 走了，它本身又是压缩包（塞进 setup 后几乎不缩小），所以排除——安装包从 36 MB 降到 18 MB |
+| 向导里选「为所有用户 / 仅为当前用户」 | `PrivilegesRequired=lowest` + `PrivilegesRequiredOverridesAllowed=dialog`：选所有用户才提权、装到 `{autopf}\Disktest`；选当前用户装到 `%LOCALAPPDATA%\Programs\Disktest`，不弹 UAC |
+| 给 `{app}` 加 `users-modify` | 程序「保存测试数据」默认存到自己所在目录（`mainwindow.cpp` 里保存对话框的默认路径）。装进 Program Files 后普通用户没有写权限，保存会直接失败 |
+| 许可协议页 + 「信息」页 | 前者是 GPL 全文（分发二进制必须给）；后者是 `installer\preinstall.txt`——**这个程序会写满分区**的警告 |
+| 开始菜单 / 桌面快捷方式、卸载项、`App Paths` | 常规安装体验；卸载会把这些注册表项一起清掉 |
+| 编译期检查 `build\dist` 完整性 | 少 `qwindows.dll` 或 fio 时直接 `#error`，不产出一个装完打不开的包 |
+
+两个编码上的硬要求（错了就是满屏乱码）：
+
+- `installer\disktest.iss`、`preinstall.txt`、`ChineseSimplified.isl` 必须存成 **UTF-8 with BOM**。
+  Inno 的编译器读不到 BOM 时会按 ANSI 代码页解释中文。
+- 官方 Inno **不带**简体中文翻译。`installer\ChineseSimplified.isl` 是随仓库维护的那份
+  （来源：kira-96/Inno-Setup-Chinese-Simplified-Translation），中文放 `[Languages]` 第一位，
+  系统语言匹配不上时用它回退。
+
+**实测验证过的**（2026-10-17，本机 Qt 6.8.3 + MSVC 19.51）：
+
+- 静默装到临时目录（`/VERYSILENT /CURRENTUSER /DIR=...`）后，用
+  `PATH=C:\Windows\System32;C:\Windows`（不含 Qt）启动 `--selftest-parse` → 退出码 0、结论 PASS；
+- 装好的 GUI 能正常起来，`fio 引擎`那一栏指向安装目录里的 `fio\fio.exe`；
+- 安装向导的中文界面逐页截图确认无乱码：安装范围对话框、许可协议页、「信息」页、选择目标位置页；
+- 卸载后安装目录、开始菜单项、`HKCU` 下的卸载项和 `App Paths` 全部清掉。
+
+> **安装包没有代码签名**：别人第一次双击会碰到 SmartScreen「Windows 已保护你的电脑」，
+> 要点「更多信息 → 仍要运行」。消掉它只能买代码签名证书再用 `signtool` 签，
+> 打包脚本解决不了。
+>
+> **为什么不用 MSI**：MSI 适合企业域内分发，但 Qt 这种「一堆 DLL + 插件子目录」用 WiX
+> 描述要逐个 `Component` 写，自定义界面也弱。要 MSI 的话得另加一套 WiX 工程，可以和现在这套共存。
 
 ### Linux 上构建（Ubuntu 22.04 Server 实测）
 
@@ -855,8 +925,9 @@ cmake --build build-linux -j
   （`windeployqt` 是 Windows 工具，发行版的 Qt6 本来就在系统里）。
   想连 fio 一起发，就把一份 Linux 版 fio 放进 `third_party/fio/`，
   打包命令会自动带上它。真要发便携包还得另配 AppImage 之类。
-- **`resources/app.rc` 只在 Windows 下参与编译**。CMake 只在 Windows 上启用 RC 语言，
-  在 Linux 上把 `.rc` 塞进 target 会让 g++ 去编它、直接报错。
+- **`resources/app.rc.in` 只在 Windows 下参与编译**。CMake 只在 Windows 上启用 RC 语言，
+  在 Linux 上把 `.rc` 塞进 target 会让 g++ 去编它、直接报错。真正交给 rc.exe 的是
+  configure 时由这个模板生成的 `build/app.rc`（图标 + 版本资源），模板自己不进编译。
 
 没有图形界面的机器（服务器 / CI）上跑自检：
 
@@ -1463,7 +1534,11 @@ disktest/
 │   ├─ Qt-LGPLv3.txt        Qt 6 —— LGPL-3.0
 │   └─ fio-GPLv2.txt        fio 3.43 —— GPL-2.0
 ├─ CMakeLists.txt           构建 + 打包（package / deploy / icon 目标）
-├─ build.bat                一键脚本（build/package/selftest/run/clean/headers/check/git）
+├─ build.bat                一键脚本（build/package/installer/selftest/run/clean/headers/check/git）
+├─ installer/               安装包（Inno Setup）
+│   ├─ disktest.iss         安装脚本：装什么、装到哪、快捷方式/卸载项/权限
+│   ├─ preinstall.txt      「信息」页：会写满分区的警告（UTF-8 with BOM）
+│   └─ ChineseSimplified.isl  Inno 6 的简体中文翻译（官方不带）
 ├─ README.md                ★ 面向用户：装、用、注意事项
 ├─ .gitignore
 │
@@ -1480,8 +1555,9 @@ disktest/
 │   perfcell.h/.cpp         性能结果格子控件
 │   mainwindow.h/.cpp       界面与阶段编排
 │
-├─ resources/               图标与 Windows 资源脚本
-│   app.rc                  把 logo.ico 塞进 exe
+├─ resources/               图标与 Windows 资源模板
+│   app.rc.in               exe 图标 + 版本资源（右键属性 → 详细信息）的模板，
+│                           CMake 填进版本号后生成 build/app.rc 再编译
 │   logo.ico                多尺寸图标（给 Windows 用）
 │   logo-source.ico         母版（128×128）
 │   logo-window.png         窗口图标（编进 qrc）
@@ -1492,6 +1568,7 @@ disktest/
 │   add_license_headers.py  给源文件补 SPDX 版权头（幂等，build.bat headers 调它）
 │   make_perf_test_csv.py   造合成性能 CSV，用来验证加载路径
 │   measure_csv_vs_json.py  CSV 与 JSON 的体积对比（当初选格式时量的）
+│   make-installer.ps1      把 build\dist 编成 setup.exe（build.bat installer 调它）
 │
 ├─ third_party/
 │   └─ fio/                 官方 fio 3.43（运行期依赖）

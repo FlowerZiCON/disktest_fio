@@ -1,4 +1,0 @@
-// disktest 的 Windows 资源脚本：把 logo.ico 塞进 exe，
-// 这样资源管理器、任务栏、Alt+Tab 都能看到程序图标。
-// 图标路径按 .rc 自身所在目录解析，所以这里只写文件名。
-IDI_APPICON ICON "logo.ico"

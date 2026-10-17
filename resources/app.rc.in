@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MOONLIGHT
+//
+// Windows 资源模板 —— 不是最终参与编译的文件。
+// CMake 把 @XXX@ 换成真实值（再补一个 UTF-8 BOM），生成 <build>/app.rc 交给 rc.exe。
+// 所以：改这里 → 重跑 cmake。不要改 build/ 目录里生成的那一份（下次 configure 就被覆盖）。
+//
+// 本文件定义 exe 的两类资源：
+//   IDI_APPICON      程序图标（资源管理器 / 任务栏 / Alt+Tab）
+//   RT_VERSION 1     版本信息 —— 资源管理器右键「属性 → 详细信息」里那一屏
+//
+// 版本号只有 CMakeLists.txt 的 project(... VERSION x.y.z) 一个来源；
+// 产品名 / 公司 / 版权 / 主页也在 CMakeLists.txt 顶部的「程序元信息」里定义。
+
+// 编码：本文件是 UTF-8（不带 BOM），CMake 生成 app.rc 时会**补上 BOM**。
+// BOM 不能省 —— rc.exe 没有 BOM 就按系统 ANSI 代码页读（中文系统是 936），
+// 中文串的字节会被当成"吞掉后面引号"的引导字节，报
+//   error C2001: 字符串字面量中的换行符
+// （#pragma code_page(65001) 在本机 Windows SDK 的 rc.exe 上实测无效，只有 BOM 可靠。）
+
+// ---------------------------------------------------------------- 图标
+// 这里必须是绝对路径：生成物在 build/ 下，写 "logo.ico" 会相对构建目录去找。
+// 而且必须用**正斜杠**：rc.exe 会解释路径里的反斜杠转义，"...\resources\logo.ico"
+// 里的 \r 会变成一个回车符，报 RC2135 file not found（实测）。
+IDI_APPICON ICON "@APP_ICON_FILE@"
+
+// ---------------------------------------------------------------- 版本信息
+// 字符串先定义成宏，下面两个语言块共用同一批值 —— 免得改一处漏一处。
+// Windows 只显示与自己界面语言匹配的那一块，所以两块都要有：
+// 中文系统读 0804，其他系统读 0409（没有匹配时回退到第一块）。
+#define S_FILE_DESCRIPTION  "@APP_FILE_DESCRIPTION@"
+#define S_FILE_VERSION      "@APP_VERSION@"
+#define S_PRODUCT_NAME      "@APP_PRODUCT_NAME@"
+#define S_PRODUCT_VERSION   "@APP_VERSION@"
+#define S_COMPANY_NAME      "@APP_COMPANY@"
+#define S_LEGAL_COPYRIGHT   "@APP_COPYRIGHT@"
+#define S_COMMENTS          "@APP_COMMENTS@"
+#define S_INTERNAL_NAME     "disktest"
+#define S_ORIGINAL_FILENAME "disktest.exe"
+
+// FILEVERSION / PRODUCTVERSION 只能是 4 个 16 位整数（逗号分隔），
+// 显示成字符串的那份在上面 S_FILE_VERSION / S_PRODUCT_VERSION 里。
+//
+// 资源名必须写数字 1，**不能**写 VS_VERSION_INFO：Windows 的版本 API
+// （GetFileVersionInfoSizeW、资源管理器属性页）都是按 RT_VERSION + ID 1 去查的，
+// 写成字符串名的资源会被当成不存在 —— exe 里明明有数据，属性页却是空的。
+// 实测：写 VS_VERSION_INFO 时 GetFileVersionInfoSizeW 返回 0。
+1 VERSIONINFO
+    FILEVERSION    @APP_VERSION_COMMA@
+    PRODUCTVERSION @APP_VERSION_COMMA@
+    FILEFLAGSMASK  0x3fL
+    FILEFLAGS      0x0L        // 0x0L = 正式版；VS_FF_DEBUG / VS_FF_PRERELEASE 都不要
+    FILEOS         0x40004L    // VOS_NT_WINDOWS32
+    FILETYPE       0x1L        // VFT_APP
+    FILESUBTYPE    0x0L        // VFT2_UNKNOWN（VFT_APP 用不到，必须写 0）
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"       // 0409 = en-US，04b0 = Unicode
+        BEGIN
+            VALUE "FileDescription",  S_FILE_DESCRIPTION
+            VALUE "FileVersion",      S_FILE_VERSION
+            VALUE "InternalName",     S_INTERNAL_NAME
+            VALUE "OriginalFilename", S_ORIGINAL_FILENAME
+            VALUE "ProductName",      S_PRODUCT_NAME
+            VALUE "ProductVersion",   S_PRODUCT_VERSION
+            VALUE "CompanyName",      S_COMPANY_NAME
+            VALUE "LegalCopyright",   S_LEGAL_COPYRIGHT
+            VALUE "Comments",         S_COMMENTS
+        END
+        BLOCK "080404b0"       // 0804 = zh-CN
+        BEGIN
+            VALUE "FileDescription",  S_FILE_DESCRIPTION
+            VALUE "FileVersion",      S_FILE_VERSION
+            VALUE "InternalName",     S_INTERNAL_NAME
+            VALUE "OriginalFilename", S_ORIGINAL_FILENAME
+            VALUE "ProductName",      S_PRODUCT_NAME
+            VALUE "ProductVersion",   S_PRODUCT_VERSION
+            VALUE "CompanyName",      S_COMPANY_NAME
+            VALUE "LegalCopyright",   S_LEGAL_COPYRIGHT
+            VALUE "Comments",         S_COMMENTS
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        // 与上面两个 StringFileInfo 块一一对应，缺一个 Windows 就找不到那一种语言。
+        VALUE "Translation", 0x409, 1200, 0x804, 1200
+    END
+END

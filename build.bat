@@ -33,6 +33,7 @@ if "%~1"=="" goto args_done
 set "ARG=%~1"
 if /i "!ARG!"=="build"    ( set "ACTION=build"    & shift & goto parse_args )
 if /i "!ARG!"=="package"  ( set "ACTION=package"  & shift & goto parse_args )
+if /i "!ARG!"=="installer" ( set "ACTION=installer" & shift & goto parse_args )
 if /i "!ARG!"=="selftest" ( set "ACTION=selftest" & shift & goto parse_args )
 if /i "!ARG!"=="run"      ( set "ACTION=run"      & shift & goto parse_args )
 if /i "!ARG!"=="clean"    ( set "ACTION=clean"    & shift & goto parse_args )
@@ -211,6 +212,36 @@ if /i "!ACTION!"=="package" (
         exit /b 1
     )
     echo Packaged: !DIST_DIR!
+)
+
+rem ---------------------------------------------------------------- installer
+rem Turn build\dist into an installable setup.exe (Inno Setup 6).
+rem The install scope (all users / current user) is chosen in the wizard;
+rem the script lives in installer\disktest.iss.
+if /i "!ACTION!"=="installer" (
+    echo.
+    echo [package] Building distributable ...
+    "!CMAKE!" --build "!BUILD_DIR!" --config Release --target package
+    if errorlevel 1 exit /b 1
+    echo.
+    call :verify_dist
+    if errorlevel 1 (
+        echo [ERROR] Package is missing files that the license requires.
+        exit /b 1
+    )
+    echo.
+    echo [installer] Compiling the Inno Setup installer ...
+    set "PS=powershell.exe"
+    for %%i in (pwsh.exe) do if not "%%~$PATH:i"=="" set "PS=%%~$PATH:i"
+    "!PS!" -NoProfile -ExecutionPolicy Bypass -File "!ROOT!\tools\make-installer.ps1"
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Installer build failed. See the messages above.
+        echo         Inno Setup 6 is required:  winget install --id JRSoftware.InnoSetup --exact
+        exit /b 1
+    )
+    echo.
+    echo Installer: !BUILD_DIR!\installer
 )
 
 if /i "!ACTION!"=="run" (
@@ -393,6 +424,7 @@ echo.
 echo  Build actions (default: build):
 echo    build       wipe build\, configure, then build Release
 echo    package     build, then package into build\dist (portable)
+echo    installer   build + package, then compile the Inno Setup setup.exe
 echo    selftest    build, then run an unattended selftest (needs /target)
 echo    run         build, then launch the program
 echo    clean       only wipe build\ (no configure, no build)
@@ -403,7 +435,7 @@ echo    check       verify licenses, fio, and source headers
 echo    git         init the repo and commit (asks nothing, pushes nothing)
 echo    help        this text
 echo.
-echo  Note: build/package/selftest/run all rebuild from scratch
+echo  Note: build/package/installer/selftest/run all rebuild from scratch
 echo        (build\ is removed first) because incremental builds
 echo        were unreliable here.
 echo.
@@ -421,6 +453,7 @@ echo  Examples:
 echo    build.bat                                    just build
 echo    build.bat clean                              start over
 echo    build.bat package                            build + package
+echo    build.bat installer                          build + package + installer
 echo    build.bat check                              repo hygiene check
 echo    build.bat git /message "first commit"        init + commit
 echo    build.bat selftest /target G: /filllimit 3000
@@ -432,6 +465,8 @@ echo  Requirements:
 echo   - Visual Studio with the "Desktop development with C++" workload
 echo   - Qt 6.5+ (Widgets + Charts), MSVC x64 build
 echo   - CMake 3.21+
+echo   - Inno Setup 6, only for the installer action:
+echo       winget install --id JRSoftware.InnoSetup --exact
 echo   - Python 3 (only for the icon target and the headers action)
 echo.
 exit /b 0

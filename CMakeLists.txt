@@ -2,8 +2,22 @@ cmake_minimum_required(VERSION 3.21)
 
 project(disktest
     VERSION 3.0.6
-    DESCRIPTION "Qt + fio disk reliability tester GUI (file mode only)"
+    DESCRIPTION "Qt + fio disk reliability and performance tester GUI"
     LANGUAGES CXX)
+
+# ---------------------------------------------------------------- 程序元信息
+#
+# 这些字符串编进 exe 的版本资源里（资源管理器 → 右键 → 属性 → 详细信息）。
+# 只在这里写一次：resources/app.rc.in 是模板，CMake 把下面的值填进去，
+# 所以「版本号 / 产品名 / 版权」不会出现 exe 属性与界面各说一套的情况。
+#
+# 版本号**不在这里**——它就是上面 project(... VERSION) 里的那个，别的地方没有第二份。
+# 产品名要和 src/uitext.h 的 kAppName 一致（那是标题栏和「关于」里显示的名字）。
+set(APP_PRODUCT_NAME     "磁盘测试By MOONLIGHT")
+set(APP_FILE_DESCRIPTION "基于 fio 的磁盘可靠性和性能测试工具")
+set(APP_COMPANY          "MOONLIGHT")
+set(APP_COPYRIGHT        "Copyright (C) 2026 MOONLIGHT. GNU GPL v3 或更高版本。")
+set(APP_HOMEPAGE         "https://github.com/FlowerZiCON/disktest_fio")
 
 # 官方 fio 放在 third_party 下。打包时只带上运行需要的文件，
 # examples/ 是给人看的样例、不随包发布。
@@ -54,11 +68,54 @@ add_executable(disktest WIN32
     resources/resources.qrc
 )
 
-# exe 文件图标（资源管理器 / 任务栏 / Alt+Tab）。
+# exe 的文件图标 + 版本资源（资源管理器 / 任务栏 / Alt+Tab / 右键属性 → 详细信息）。
 # .rc 只有 Windows 工具链认识，CMake 也只在 Windows 上启用 RC 语言；
 # 在 Linux 上把它塞进 add_executable 会让 g++ 去编这个文件，直接报错。
+#
+# 参与编译的不是手写的 .rc，而是从 resources/app.rc.in 生成的：模板里只有
+# @...@ 占位符，版本号/产品名/版权/平台标识在 configure 时填进去 —— 这样
+# 「改版本号只改 project(... VERSION)」这条规则对 exe 属性同样成立。
+# 生成到 build/ 而不是原地改写：仓库里那份 .in 保持干净、不会被 configure 弄脏。
 if(WIN32)
-    target_sources(disktest PRIVATE resources/app.rc)
+    if(PROJECT_VERSION_TWEAK)
+        set(_ver_tweak "${PROJECT_VERSION_TWEAK}")
+    else()
+        set(_ver_tweak "0")
+    endif()
+    # FILEVERSION 只能是 4 个 16 位整数，所以这里拼成逗号形式；
+    # 给人看的那份（"3.0.6"）走 APP_VERSION。
+    set(APP_VERSION_COMMA
+        "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},${_ver_tweak}")
+    set(APP_VERSION "${PROJECT_VERSION}")
+
+    # 这是哪一份包 —— 和 src/uitext.h 的 DISKTEST_ARCH 回答同一个问题，
+    # 报问题、对着 release 页挑包时，看一眼属性就知道。
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(APP_ARCH "win64")
+    else()
+        set(APP_ARCH "win32")
+    endif()
+    set(APP_COMMENTS "基于 fio 的磁盘可靠性测试 GUI（${APP_ARCH}）；源码 ${APP_HOMEPAGE}")
+
+    # .rc 里的图标路径按生成文件所在目录（build/）解析，所以必须给绝对路径。
+    # 用正斜杠而不是 TO_NATIVE_PATH：rc.exe 会解释字符串里的反斜杠转义，
+    # "...\resources\logo.ico" 里的 \r 会变成一个回车，报 RC2135 file not found。
+    set(APP_ICON_FILE "${CMAKE_SOURCE_DIR}/resources/logo.ico")
+
+    # 生成的 .rc 必须带 UTF-8 BOM：没有 BOM 时 rc.exe 按系统 ANSI 代码页读
+    # （中文系统是 936），中文串里的字节会"吞掉"后面的引号，报
+    #   error C2001: 字符串字面量中的换行符
+    # BOM 在这里补而不是写进模板：编辑器一旦"另存为 UTF-8 无 BOM"就会把模板里的
+    # BOM 悄悄抹掉，构建随即失败（实测踩过），不如让生成步骤每次都补。
+    file(READ "${CMAKE_SOURCE_DIR}/resources/app.rc.in" _rc_template)
+    string(CONFIGURE "${_rc_template}" _rc_text @ONLY)
+    string(ASCII 239 187 191 _rc_bom)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/app.rc" "${_rc_bom}${_rc_text}")
+    # 模板改了要重新 configure，否则 build/ 里的 app.rc 还是老的。
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 "${CMAKE_SOURCE_DIR}/resources/app.rc.in")
+
+    target_sources(disktest PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
 endif()
 
 target_link_libraries(disktest PRIVATE Qt6::Widgets Qt6::Charts)
