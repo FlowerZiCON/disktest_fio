@@ -2,7 +2,7 @@
 ;  disktest / 硬盘可靠性测试工具 —— Inno Setup 6 安装脚本
 ;
 ;  用法（通常由 tools\make-installer.ps1 或 build.bat installer 调用）：
-;      ISCC.exe /DMyAppVersion=3.0.6 installer\disktest.iss
+;      ISCC.exe /DMyAppVersion=<版本> installer\disktest.iss
 ;
 ;  输入  ..\build\dist        build.bat package 的产物
 ;                             （disktest.exe + Qt DLL + 平台插件 + fio + 许可证）
@@ -17,9 +17,11 @@
 ; ============================================================================
 
 #define MyAppName "磁盘测试By MOONLIGHT"
+#define MyAppNameTw "磁碟測試By MOONLIGHT"
 #define MyAppNameEn "Disk Tester By MOONLIGHT"
 #ifndef MyAppVersion
-  #define MyAppVersion "3.0.6"
+  ; 只是个兜底：make-installer.ps1 从 CMakeLists.txt 读版本并通过 /D 传进来。
+  #define MyAppVersion "3.0.7"
 #endif
 #define MyAppPublisher "MOONLIGHT"
 #define MyAppExeName "disktest.exe"
@@ -51,12 +53,14 @@ AllowNoIcons=yes
 ; GPL 第 4/6 条要求随二进制提供许可证文本；发行包里 licenses\ 还有 Qt 与 fio 的。
 LicenseFile=..\LICENSE
 ; 开测前必须先看到的警告页（这个程序会写满分区）。
-InfoBeforeFile=preinstall.txt
+; InfoBeforeFile 在编译期只能写一个文件，而三种界面语言各有一份；
+; 所以这里先放简体那份把页面建出来，运行时在 [Code] 里按实际语言换成对应的。
+InfoBeforeFile=preinstall.zh-CN.txt
 OutputDir=..\build\installer
 OutputBaseFilename=disktest-{#MyAppVersion}-setup
 SetupIconFile=..\resources\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName={#MyAppName} {#MyAppVersion}
+UninstallDisplayName={cm:AppShortcutName} {#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -81,10 +85,29 @@ VersionInfoProductVersion={#MyAppVersion}
 VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 
 [Languages]
-; 官方 Inno 不带中文，ChineseSimplified.isl 是同目录下随仓库一起维护的翻译。
-; 中文放第一个：系统语言匹配不上时以它作为回退。
+; 官方 Inno 的 Languages\ 目录里没有中文。这两份是 jrsoftware 的 istrans 列表上
+; 的非官方翻译（简体：Zhenghan Yang；繁体：GoneTone），放在仓库里随工程维护，
+; 免得每台打包机都要自己装一遍。
+;
+; 次序就是回退次序：系统语言匹配不上任何一份时用第一个（简体）。
+; 简体 = LanguageID $0804（zh-CN），繁体 = $0404（zh-TW）；繁体系统会自己选到繁体。
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+Name: "chinesetraditional"; MessagesFile: "ChineseTraditional.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+; 标题栏里的品牌名也要跟着界面语言走：英文界面摆一个中文品牌名很怪，
+; 繁体界面里更不该出现简体字（程序自己的窗口标题叫「磁碟測試By MOONLIGHT」，
+; 见 resources/i18n/zh_TW.tsv 的 kAppName）。
+chinesesimplified.SetupWindowTitle={#MyAppName} {#MyAppVersion} 安装程序
+chinesetraditional.SetupWindowTitle={#MyAppNameTw} {#MyAppVersion} 安裝程式
+english.SetupWindowTitle={#MyAppNameEn} {#MyAppVersion} Setup
+
+[CustomMessages]
+; 开始菜单 / 桌面快捷方式的名字，以及卸载项显示的名字（同一份程序，三种叫法）
+AppShortcutName={#MyAppName}
+chinesetraditional.AppShortcutName={#MyAppNameTw}
+english.AppShortcutName={#MyAppNameEn}
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -99,15 +122,25 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; 装进 setup.exe 后几乎不缩小（占了安装包一半体积）。
 Source: "{#DistDir}\*"; DestDir: "{app}"; Excludes: "vc_redist.x64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; 「安装前必读」三份译文：dontcopy = 不安装，只在运行时按语言提取到 {tmp}
+; （提取与替换见 [Code] 的 CurPageChanged）。
+Source: "preinstall.*.txt"; DestDir: "{tmp}"; Flags: dontcopy
+
 [Dirs]
-; 程序默认把测试结果 CSV 存到自己所在的目录（mainwindow.cpp 里保存对话框的默认路径）。
-; 装进 Program Files 之后普通用户对 {app} 没有写权限，「文件 → 保存测试数据」会直接失败，
-; 所以给 Users 加可修改权限。仅为当前用户安装时 Inno 会忽略这个参数（本来就可写）。
+; 程序默认把测试结果 CSV 存到自己所在的目录（mainwindow.cpp 里保存对话框的默认路径），
+; 界面语言也存在这里的 disktest.ini。装进 Program Files 之后普通用户对 {app} 没有写权限，
+; 这两件事都会失败，所以给 Users 加可修改权限。仅为当前用户安装时 Inno 会忽略这个参数
+; （%LOCALAPPDATA%\Programs 本来就可写）。
 Name: "{app}"; Permissions: users-modify
 
+[UninstallDelete]
+; 语言设置是程序运行时自己建的（不属于 [Files] 装的，Inno 不会自动删），卸载时顺手清掉。
+; 同一目录下的测试结果 CSV **不删**：那是用户的数据，别在卸载时替用户做决定。
+Type: files; Name: "{app}\disktest.ini"
+
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppNameEn}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppNameEn}"; Tasks: desktopicon
+Name: "{autoprograms}\{cm:AppShortcutName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppNameEn}"
+Name: "{autodesktop}\{cm:AppShortcutName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppNameEn}"; Tasks: desktopicon
 
 [Registry]
 ; App Paths：让 Win+R 里直接敲 disktest 也能起来。按安装范围落到 HKLM 或 HKCU。
@@ -116,3 +149,43 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#MyApp
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// ----------------------------------------------------------------------------
+//  「安装前必读」按界面语言换文件
+//
+//  InfoBeforeFile 是编译期指令，只能指定一个文件；而这句话三种语言得各说一遍。
+//  做法：页面还是由简体那份建出来（见 [Setup] 的 InfoBeforeFile），三份都以
+//  dontcopy 打进 setup，翻到「信息」页时把 memo 的内容换成当前语言那一份。
+//
+//  放在 CurPageChanged 而不是 InitializeWizard，是因为 memo 的正文在页面显示前
+//  才定稿；在初始化里改会被随后的加载覆盖掉。
+// ----------------------------------------------------------------------------
+var
+  InfoBeforeFileLoaded: Boolean;
+
+procedure LoadInfoBeforePage;
+var
+  FileName: String;
+begin
+  case ActiveLanguage of
+    'chinesetraditional': FileName := 'preinstall.zh-TW.txt';
+    'english':            FileName := 'preinstall.en.txt';
+  else
+    FileName := 'preinstall.zh-CN.txt';
+  end;
+
+  if not InfoBeforeFileLoaded then
+  begin
+    ExtractTemporaryFile(FileName);
+    InfoBeforeFileLoaded := True;
+  end;
+
+  WizardForm.InfoBeforeMemo.Lines.LoadFromFile(ExpandConstant('{tmp}\') + FileName);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpInfoBefore then
+    LoadInfoBeforePage;
+end;

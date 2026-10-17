@@ -50,9 +50,9 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     , m_traces(data.perfTraces())
 {
     const bool perf = (m_data.mode == RunData::Mode::Performance);
-    setWindowTitle(kResultWindowTitleFmt.arg(QFileInfo(m_data.path).fileName(),
-                                             perf ? kModeNamePerformance
-                                                  : kModeNameReliability));
+    setWindowTitle(kResultWindowTitleFmt().arg(QFileInfo(m_data.path).fileName(),
+                                             perf ? kModeNamePerformance()
+                                                  : kModeNameReliability()));
     setAttribute(Qt::WA_DeleteOnClose);
     resize(1000, 720);
 
@@ -62,7 +62,7 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
 
     // ---- 顶部：这是哪个模式、哪份文件 ----
     auto *modeLabel = new QLabel(
-        kResultModeLabelFmt.arg(perf ? kModeNamePerformance : kModeNameReliability), this);
+        kResultModeLabelFmt().arg(perf ? kModeNamePerformance() : kModeNameReliability()), this);
     QFont modeFont = modeLabel->font();
     modeFont.setBold(true);
     modeFont.setPointSizeF(modeFont.pointSizeF() + 1.5);
@@ -71,13 +71,13 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
 
     // 老文件没有 test_mode：明确说一句，免得用户以为程序读错了模式
     if (!m_data.modeExplicit) {
-        auto *legacy = new QLabel(kResultLegacyModeNote, this);
+        auto *legacy = new QLabel(kResultLegacyModeNote(), this);
         legacy->setStyleSheet(QStringLiteral("color:#8a6d00;"));
         root->addWidget(legacy);
     }
 
     auto *sourceLabel = new QLabel(
-        kResultSourceFmt.arg(QDir::toNativeSeparators(
+        kResultSourceFmt().arg(QDir::toNativeSeparators(
             QFileInfo(m_data.path).absoluteFilePath())), this);
     sourceLabel->setStyleSheet(QStringLiteral("color:#666;"));
     sourceLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -106,15 +106,15 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         // 均速带"顺序"二字，因为它统计的是整轮采样、而不是某一项。
         const double bytes = m_data.paramDouble(QStringLiteral("perf_data_bytes"), 0.0);
         QVector<QPair<QString, QString>> row1;
-        row1 << qMakePair(kResultSummaryTarget, m_data.param(QStringLiteral("target")))
-             << qMakePair(kResultSummarySeqWrite,
+        row1 << qMakePair(kResultSummaryTarget(), m_data.param(QStringLiteral("target")))
+             << qMakePair(kResultSummarySeqWrite(),
                           RunData::formatSpeed(m_data.averageWriteMiBps()))
-             << qMakePair(kResultSummarySeqRead,
+             << qMakePair(kResultSummarySeqRead(),
                           RunData::formatSpeed(m_data.averageReadMiBps()));
         QVector<QPair<QString, QString>> row2;
-        row2 << qMakePair(kResultSummaryData,
+        row2 << qMakePair(kResultSummaryData(),
                           bytes > 0.0 ? RunData::formatBytes(qint64(bytes)) : QString())
-             << qMakePair(kResultSummaryElapsed,
+             << qMakePair(kResultSummaryElapsed(),
                           RunData::formatDuration(qint64(m_data.elapsedSeconds())));
         rowsBacking << row1 << row2;
     } else {
@@ -125,27 +125,27 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         const double planned = m_data.paramDouble(QStringLiteral("planned_bytes"), 0.0);
 
         QVector<QPair<QString, QString>> row1;
-        row1 << qMakePair(kResultSummaryTarget, m_data.param(QStringLiteral("target")))
-             << qMakePair(kResultSummaryMode, m_data.param(QStringLiteral("mode")));
+        row1 << qMakePair(kResultSummaryTarget(), m_data.param(QStringLiteral("target")))
+             << qMakePair(kResultSummaryMode(), m_data.param(QStringLiteral("mode")));
         QVector<QPair<QString, QString>> row2;
-        row2 << qMakePair(kResultSummaryBlock, m_data.param(QStringLiteral("block_size")))
-             << qMakePair(kResultSummarySamples, QString::number(m_data.sampleCount()));
+        row2 << qMakePair(kResultSummaryBlock(), m_data.param(QStringLiteral("block_size")))
+             << qMakePair(kResultSummarySamples(), QString::number(m_data.sampleCount()));
         QVector<QPair<QString, QString>> row3;
-        row3 << qMakePair(kResultSummaryRounds, QString::number(qMax(1, rounds)));
+        row3 << qMakePair(kResultSummaryRounds(), QString::number(qMax(1, rounds)));
         if (fileCount > 0 && fileSize > 0.0) {
-            row3 << qMakePair(kResultSummaryPlan,
+            row3 << qMakePair(kResultSummaryPlan(),
                               QStringLiteral("%1 × %2 = %3")
                                   .arg(fileCount)
                                   .arg(RunData::formatBytes(qint64(fileSize)))
                                   .arg(RunData::formatBytes(qint64(planned))));
         }
         QVector<QPair<QString, QString>> row4;
-        row4 << qMakePair(kResultSummaryAvgWrite,
+        row4 << qMakePair(kResultSummaryAvgWrite(),
                           RunData::formatSpeed(m_data.averageWriteMiBps()))
-             << qMakePair(kResultSummaryAvgRead,
+             << qMakePair(kResultSummaryAvgRead(),
                           RunData::formatSpeed(m_data.averageReadMiBps()));
         QVector<QPair<QString, QString>> row5;
-        row5 << qMakePair(kResultSummaryElapsed,
+        row5 << qMakePair(kResultSummaryElapsed(),
                           RunData::formatDuration(qint64(m_data.elapsedSeconds())));
         rowsBacking << row1 << row2 << row3 << row4 << row5;
     }
@@ -170,7 +170,7 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
             auto *titleLabel = new QLabel(rowEntries.at(k).first, infoBox);
             titleLabel->setStyleSheet(QStringLiteral("color:#666;"));
             auto *valueLabel = new QLabel(rowEntries.at(k).second.isEmpty()
-                                              ? kTextNone
+                                              ? kTextNone()
                                               : rowEntries.at(k).second,
                                           infoBox);
             valueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -188,16 +188,16 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         QString verifyText;
         QString verifyNote;
         if (verifyKnown) {
-            verifyText = kVerifyBannerHead.arg(verifyCount);
-            verifyNote = kVerifyBannerNote;
+            verifyText = kVerifyBannerHead().arg(verifyCount);
+            verifyNote = kVerifyBannerNote();
             // 告警说 N 处、文件里却只有几条明细时说明一句，否则会让人
             // 以为"就只有这几处坏"（图上能画的色带也只到明细那么多）。
             const int details = m_data.verifyFailuresText().size();
             if (verifyCount > details && details > 0)
-                verifyNote += QLatin1Char('\n') + kResultVerifyDetailsShort.arg(details).arg(verifyCount);
+                verifyNote += QLatin1Char('\n') + kResultVerifyDetailsShort().arg(details).arg(verifyCount);
         } else {
-            verifyText = kVerifyCountUnreadable;
-            verifyNote = kVerifyCountUnreadableNote;
+            verifyText = kVerifyCountUnreadable();
+            verifyNote = kVerifyCountUnreadableNote();
         }
         auto *verifyLabel = new QLabel(this);
         verifyLabel->setText(verifyText + QLatin1Char('\n') + verifyNote);
@@ -212,7 +212,7 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     // 解析时跳过的采样行：这份结果**不完整**，必须说出来 ——
     // 静默少画几个点，用户会拿一条缺口的曲线当成真实曲线。
     if (m_data.droppedSampleCount() > 0) {
-        auto *skipped = new QLabel(kStatusSkippedLines.arg(m_data.droppedSampleCount()), this);
+        auto *skipped = new QLabel(kStatusSkippedLines().arg(m_data.droppedSampleCount()), this);
         skipped->setStyleSheet(QStringLiteral("color:#8a6d00;"));
         skipped->setWordWrap(true);
         root->addWidget(skipped);
@@ -229,14 +229,14 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     if (perf)
         buildPerfTable(root);
 
-    m_hintLabel = new QLabel(perf ? kResultPerfHint : kResultReliabilityHint, this);
+    m_hintLabel = new QLabel(perf ? kResultPerfHint() : kResultReliabilityHint(), this);
     m_hintLabel->setStyleSheet(QStringLiteral("color:#666;"));
     m_hintLabel->setWordWrap(true);
     root->addWidget(m_hintLabel);
 
     auto *buttons = new QHBoxLayout;
     buttons->addStretch(1);
-    auto *closeButton = new QPushButton(kBtnClose, this);
+    auto *closeButton = new QPushButton(kBtnClose(), this);
     connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
     buttons->addWidget(closeButton);
     root->addLayout(buttons);
@@ -282,20 +282,20 @@ void ResultWindow::buildChartStyleRow(QVBoxLayout *root)
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(6);
 
-    auto *styleLabel = new QLabel(kLabelPlotStyle, this);
-    m_lineRadio = new QRadioButton(kPlotLine, this);
-    m_scatterRadio = new QRadioButton(kPlotScatter, this);
+    auto *styleLabel = new QLabel(kLabelPlotStyle(), this);
+    m_lineRadio = new QRadioButton(kPlotLine(), this);
+    m_scatterRadio = new QRadioButton(kPlotScatter(), this);
     // 显式互斥组：不依赖"同一个父窗口"这条隐式规则
     auto *styleGroup = new QButtonGroup(this);
     styleGroup->setExclusive(true);
     styleGroup->addButton(m_lineRadio);
     styleGroup->addButton(m_scatterRadio);
 
-    auto *densityLabel = new QLabel(kLabelDensity, this);
-    m_densityHighRadio = new QRadioButton(kDensityHigh, this);
-    m_densityLowRadio = new QRadioButton(kDensityLow, this);
-    m_densityHighRadio->setToolTip(kDensityHighTip);
-    m_densityLowRadio->setToolTip(kDensityLowTip);
+    auto *densityLabel = new QLabel(kLabelDensity(), this);
+    m_densityHighRadio = new QRadioButton(kDensityHigh(), this);
+    m_densityLowRadio = new QRadioButton(kDensityLow(), this);
+    m_densityHighRadio->setToolTip(kDensityHighTip());
+    m_densityLowRadio->setToolTip(kDensityLowTip());
     auto *densityGroup = new QButtonGroup(this);
     densityGroup->setExclusive(true);
     densityGroup->addButton(m_densityHighRadio);
@@ -343,7 +343,7 @@ void ResultWindow::buildPerfTable(QVBoxLayout *root)
     static_assert(kExpectedPerfCells == ResultWindow::kPerfCellCount,
                   "性能测试项数量变了：m_readCells/m_writeCells 的长度要跟着改");
 
-    auto *box = new QGroupBox(kGroupPerfItems.arg(m_data.perfRuntimeSeconds()), this);
+    auto *box = new QGroupBox(kGroupPerfItems().arg(m_data.perfRuntimeSeconds()), this);
     auto *grid = new QGridLayout(box);
     grid->setContentsMargins(6, 6, 6, 6);
     grid->setHorizontalSpacing(8);
@@ -352,8 +352,8 @@ void ResultWindow::buildPerfTable(QVBoxLayout *root)
     grid->setColumnStretch(1, 2);
     grid->setColumnStretch(2, 2);
 
-    auto *headRead = new QLabel(kPerfColRead, box);
-    auto *headWrite = new QLabel(kPerfColWrite, box);
+    auto *headRead = new QLabel(kPerfColRead(), box);
+    auto *headWrite = new QLabel(kPerfColWrite(), box);
     for (QLabel *label : {headRead, headWrite}) {
         QFont font = label->font();
         font.setBold(true);
@@ -426,7 +426,7 @@ void ResultWindow::rebuildPerfChart(int item)
 
     // 只显示这一项：图表上不可能同时画四条线，所以固定"一次一项"，
     // 和主界面点结果格子看到的是同一张图。
-    m_hintLabel->setText(kResultShowOneFmt.arg(FioConfig::perfItemName(all.at(item))));
+    m_hintLabel->setText(kResultShowOneFmt().arg(FioConfig::perfItemName(all.at(item))));
 }
 
 void ResultWindow::rebuildPerfCombinedChart()
@@ -437,7 +437,7 @@ void ResultWindow::rebuildPerfCombinedChart()
     SpeedChart::plotRunData(m_data, m_chart,
                             m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
                                                            : SpeedChart::Density::High);
-    m_hintLabel->setText(kResultPerfNoItemNote);
+    m_hintLabel->setText(kResultPerfNoItemNote());
 }
 
 ResultWindow *ResultWindow::open(QWidget *parent, const QString &path)
@@ -446,7 +446,7 @@ ResultWindow *ResultWindow::open(QWidget *parent, const QString &path)
     QString error;
     if (!RunData::parse(path, &data, &error)) {
         if (parent)
-            QMessageBox::warning(parent, kErrLoadDataFailed, error);
+            QMessageBox::warning(parent, kErrLoadDataFailed(), error);
         return nullptr;
     }
 

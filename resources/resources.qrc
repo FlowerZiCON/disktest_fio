@@ -3,4 +3,14 @@
     <qresource prefix="/">
         <file>logo-window.png</file>
     </qresource>
+    <!--
+        界面译文随 exe 一起走：每一条界面文案在 src/uitext.def 里有一个常量名，
+        这里按同名加一行译文。程序启动时先找 exe 目录下的 i18n\en.tsv
+        （改一行译文不用重新编译），找不到才用编进来的这份。
+        文件格式见 resources/i18n/en.tsv 顶部的注释。
+    -->
+    <qresource prefix="/i18n">
+        <file alias="en.tsv">i18n/en.tsv</file>
+        <file alias="zh_TW.tsv">i18n/zh_TW.tsv</file>
+    </qresource>
 </RCC>

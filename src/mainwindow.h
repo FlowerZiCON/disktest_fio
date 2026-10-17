@@ -20,9 +20,11 @@
 #include "driveinfo.h"
 #include "fioconfig.h"
 #include "fiorunner.h"
+#include "i18n.h"
 #include "rundata.h"
 
 QT_BEGIN_NAMESPACE
+class QActionGroup;
 class QButtonGroup;
 class QCheckBox;
 class QComboBox;
@@ -147,6 +149,12 @@ private:
 
     void buildUi();
     void buildMenu();
+    /// 「帮助 → 语言」：存下选择并**重启程序**。
+    ///
+    /// 不做原地重译：界面文案是搭窗口时取的，原地换语言要么把整个窗口拆了
+    /// 重建（运行中的测试跟着一起丢），要么得给每个控件写一套 retranslate。
+    /// 重启一份新进程最省事，也不会和正在跑的 fio 抢测试目录。
+    void switchLanguage(i18n::Language language);
     void buildParamPanel(QWidget *panel);
     /// 性能模式的参数页：测试数据大小 + 测试项/结果表。
     void buildPerfPage(QWidget *page);
@@ -291,6 +299,8 @@ private:
     /// 一旦控件的父子关系或插入方式变了，就可能出现两个同时选中或都不选。
     QButtonGroup *m_plotStyleGroup   = nullptr;
     QButtonGroup *m_densityGroup     = nullptr;
+    /// 「帮助 → 语言」里那三个互斥项（数据里存的是 i18n::Language 的整数值）
+    QActionGroup *m_languageGroup    = nullptr;
 
     // ---- 状态显示 ----
     QLabel       *m_writeValueLabel = nullptr;

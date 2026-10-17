@@ -1,0 +1,742 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MOONLIGHT
+//
+// ============================================================================
+//  界面文案表（被 uitext.h 用 X-macro 方式 include **两次**，不要单独 include）
+//
+//  第一次：把每一行展开成一个 inline 函数，例如
+//              QString kBtnStart() { return i18n::text("kBtnStart", "开始测试"); }
+//  第二次：把每一行收成"键 -> 中文原文"的目录，供 --i18n-check 检查译文覆盖率。
+//
+//  所以这里的每一行都必须写成 UI_TEXT(名字, 中文原文) 或 UI_TEXT_RAW(名字, 原文)：
+//    UI_TEXT     界面文案：会去查当前语言的译文，查不到就退回中文原文
+//    UI_TEXT_RAW 不翻译：版本号、编译时间、URL、日期格式这类必须逐字一致的东西
+//
+//  改文案只改这一个文件。含 %1 %2 的是 QString::arg() 占位符，
+//  改动时注意别把占位符删掉——译文里少一个占位符，--i18n-check 会报出来。
+// ============================================================================
+
+UI_TEXT(kAppName, "磁盘测试By MOONLIGHT")
+UI_TEXT_RAW(kAppVersion, DISKTEST_VERSION)
+UI_TEXT_RAW(kAppArch, DISKTEST_ARCH)
+UI_TEXT_RAW(kBuildTime, DISKTEST_BUILD_DATE " " DISKTEST_BUILD_TIME)
+
+/// —— 下面三项请改成你自己的信息 ——
+UI_TEXT_RAW(kAuthor, "MOONLIGHT")
+UI_TEXT_RAW(kContact, "3607253395")
+
+// ── 菜单 ──
+UI_TEXT(kMenuFile, "文件(&F)")
+UI_TEXT(kMenuOpenTestDir, "打开测试目录(&O)")
+UI_TEXT(kMenuCleanupFiles, "清理测试文件(&C)…")
+UI_TEXT(kMenuSaveData, "保存测试数据(&V)…")
+UI_TEXT(kMenuSaveDataTip, "把本次运行的参数和逐点采样数据存成 CSV")
+UI_TEXT(kMenuLoadData, "打开测试结果(&L)…")
+UI_TEXT(kMenuLoadDataTip, "在独立窗口里查看之前保存的测试结果（按数据自身的模式显示）")
+UI_TEXT(kMenuSaveDiagnostics, "保存诊断输出(&S)…")
+UI_TEXT(kMenuQuit, "退出(&Q)")
+UI_TEXT(kMenuHelp, "帮助(&H)")
+UI_TEXT(kMenuAbout, "关于(&A)")
+
+// ── 语言菜单 ──
+// 菜单标题和三个语言名**一律不翻译**：界面语言从英文变成简体中文之后，
+// 菜单里还得能找到"English"和"繁體中文"，否则看不懂的人就换不回去了。
+UI_TEXT_RAW(kMenuLanguage, "语言 / Language")
+UI_TEXT_RAW(kLangSimplified, "简体中文")
+UI_TEXT_RAW(kLangTraditional, "繁體中文")
+UI_TEXT_RAW(kLangEnglish, "English")
+/// 测试跑着的时候不让换语言：换语言要重启程序，跑到一半会被打断。
+UI_TEXT(kMsgLanguageBusy, "正在测试中，先点「停止」再切换界面语言。")
+UI_TEXT(kMsgLanguageSwitchTitle, "切换界面语言")
+UI_TEXT(kErrLanguageRestartFailed,
+        "界面语言已保存，但重新启动失败：\n%1\n\n"
+        "请手动关掉本程序再打开一次，新语言就会生效。")
+
+// ── 磁盘 / 分区列表 ──
+//
+// 列表是**两层**的：一块物理磁盘一行，它下面的每个文件系统各一行。
+// 选中的永远是"文件系统"那一层，因为本工具只能测文件系统（裸设备一律拒绝）。
+UI_TEXT(kTextUnknownDevice, "(未知设备)")
+UI_TEXT(kFsNotMounted, "未挂载")
+UI_TEXT(kFsReadOnly, "只读挂载")
+UI_TEXT(kFsNoWritableDir, "没有可写目录（需要 root）")
+UI_TEXT(kFsNetworkWarning, "网络文件系统：测到的是网络，不是盘")
+/// 被排除出列表的卷以及原因。写进自检报告 ——
+/// 否则用户只会看到"我的盘怎么不见了"，无从判断是被规则挡了还是真没认出来。
+UI_TEXT(kIgnoredVolumeFmt, "%1（%2）")
+UI_TEXT(kVolumeWhyNetwork, "网络驱动器")
+UI_TEXT(kVolumeWhyRamdisk, "内存盘")
+UI_TEXT(kVolumeWhyNoPhysicalDisk, "没有对应的物理磁盘")
+UI_TEXT(kVolumeWhyNoRoot, "没有根目录或类型未知")
+UI_TEXT(kDiskSystemTag, "[系统盘]")
+UI_TEXT(kDiskVirtualTag, "[虚拟设备]")
+/// 文件系统那一行的主文本：设备名、文件系统、挂载点。**给自检报告用** ——
+/// 报告是纯文本，不缺宽度，多写几个字段方便和 lsblk / 磁盘管理对照。
+/// 列表里那一行只用文件系统本身，见 FileSystemEntry::fsLine()。
+UI_TEXT(kFsRowLine, "%1  %2  %3")
+UI_TEXT(kGroupTargetDrive, "选择磁盘")
+UI_TEXT(kColDeviceTree, "磁盘")
+UI_TEXT(kColTargetDir, "分区")
+UI_TEXT(kColUsage, "使用量")
+UI_TEXT(kColUsedTotal, "已用 / 总空间")
+UI_TEXT(kDriveHintClick, "展开磁盘，选中要测的分区")
+UI_TEXT(kBtnRefresh, "刷新")
+UI_TEXT(kBtnBrowseDir, "浏览目录…")
+UI_TEXT(kLabelTargetDriveColon, "目标磁盘：")
+/// 自检报告里"这次枚举到了哪些盘/分区"那几行
+UI_TEXT(kDiskSummaryLine, "%1  共 %2")
+UI_TEXT(kFsSummaryLine, "    %1  可测目录 %2")
+UI_TEXT(kFsSummaryNoDir, "    %1  ✗ %2")
+UI_TEXT(kVolumeLabelFmt, "卷标: %1")
+UI_TEXT(kVolumeFsFmt, "文件系统: %1")
+UI_TEXT(kVolumeDeviceFmt, "设备: %1")
+UI_TEXT(kVolumeMountFmt, "挂载点: %1")
+UI_TEXT(kVolumeSpaceFmt, "已用 %1 / 共 %2，可用 %3（%4%）")
+UI_TEXT(kSelfTestTargetMissing, "自检指定的目标目录 %1 不在任何可测的文件系统上，已中止")
+UI_TEXT(kTargetGone, "原来的目标目录 %1 已不可用，请重新选择")
+UI_TEXT(kTargetNotSelected, "还没有选中目标分区。")
+UI_TEXT(kDiskSpaceUnselected, "未选择分区")
+UI_TEXT(kTargetFolderFmt, "目标：%1")
+/// 目标目录不在文件系统根目录上时必须说清"会写满整个文件系统"，
+/// 否则用户会以为只写自己选的那个目录（比如 /home/moonlight）。
+UI_TEXT(kTargetFilesystemFmt, "\n所属文件系统：%1（%2），挂载于 %3")
+UI_TEXT(kTargetFillWholeFmt, "\n⚠ 测试会写满整个 %1 文件系统（共 %2），不只是上面这个目录")
+UI_TEXT(kTargetNetworkWarn, "\n⚠ 网络文件系统：测到的是网络，不是磁盘")
+UI_TEXT(kTargetPlanFmt, "\n将写入：%1 个文件 × %2（合计 %3）")
+UI_TEXT(kTargetNoSpaceForPlan, "\n剩余空间不足")
+UI_TEXT(kTargetSelfTestFillLimit, "\n[自检] 填充上限 %1 MiB")
+UI_TEXT(kDiskSpaceAvailable, "可用 %1 / 共 %2")
+UI_TEXT(kDiskBarUsedPercent, "已用 %1%")
+/// 「浏览目录…」对话框
+UI_TEXT(kDlgBrowseTargetTitle, "选择测试目录")
+UI_TEXT(kDlgBrowseTargetHint,
+        "选一个目录，测试文件会建在它下面的 %1 里。\n"
+        "容量与「写满」针对的是这个目录**所在的文件系统**，不是这个目录本身。")
+UI_TEXT(kErrBrowseDirNotWritable, "这个目录不可写：%1")
+UI_TEXT(kErrBrowseDirNotMounted, "这个目录所在的文件系统读不到容量信息：%1")
+
+// ── 测试参数 ──
+UI_TEXT(kModeSeq, "顺序读写")
+UI_TEXT(kModeRand, "随机读写")
+UI_TEXT(kConfigDescribeFmt, "%1  %2 直接IO  bs=%3  iodepth=%4  校验=%5")
+UI_TEXT(kVerifyOn, "开")
+UI_TEXT(kVerifyOff, "关")
+UI_TEXT(kGroupFioEngine, "fio 引擎")
+#ifdef Q_OS_WIN
+UI_TEXT(kFioPathPlaceholder_Win, "fio.exe 的完整路径")
+#else
+UI_TEXT(kFioPathPlaceholder_Posix, "fio 的完整路径")
+#endif
+UI_TEXT(kBtnBrowse, "浏览…")
+UI_TEXT(kFioEngineNotFound, "引擎: 未找到")
+UI_TEXT(kFioEngineVersion, "引擎: %1（%2）")
+UI_TEXT(kFioBundled, "自带")
+UI_TEXT(kFioFromSystem, "系统中")
+UI_TEXT(kGroupTestParams, "测试参数")
+UI_TEXT(kModeItemSeq, "顺序读写")
+UI_TEXT(kModeItemRand, "随机读写")
+UI_TEXT(kLabelRwMode, "读写模式")
+UI_TEXT(kLabelBlockSize, "块大小")
+UI_TEXT(kLabelIodepth, "队列深度")
+UI_TEXT(kIoModeDirectFmt, "%1 + 直接 I/O（绕过系统缓存）")
+/// 探测到的引擎不支持直接 I/O（Windows 上的 psync/sync/vsync/mmap）时的说明。
+/// 这种情况数字会包含系统缓存，必须让用户看到，不能默默当真。
+UI_TEXT(kIoModeBufferedFmt, "%1 + 缓冲 I/O（该引擎不支持直接 I/O）")
+UI_TEXT(kLogBufferedIoWarning,
+        "引擎 %1 不支持直接 I/O，本次改为缓冲 I/O —— 读数会包含系统缓存，"
+        "只能作参考，不能当磁盘真实性能。")
+UI_TEXT(kLabelRounds, "测试圈数")
+UI_TEXT(kRoundsSuffix, " 圈")
+UI_TEXT(kRoundsTip,
+        "整轮测试重复几遍。\n"
+        "每一圈都会重新删除测试文件、重新按当时的剩余空间规划，\n"
+        "相当于把整轮测试重跑一遍。\n"
+        "只勾选「读取」时不删文件，只是把校验重复几遍。")
+
+// ── 运行日志（左侧下方） ──
+UI_TEXT(kGroupRunLog, "运行日志")
+UI_TEXT(kLogPlaceholder, "这里会按时间顺序记录每一圈、每个阶段做了什么；出错用红色显示。")
+UI_TEXT(kLogRoundsPlanned, "计划测试 %1 圈")
+UI_TEXT(kLogRoundStart, "第 %1/%2 圈开始")
+UI_TEXT(kLogRoundStartOne, "开始测试")
+UI_TEXT(kLogPhaseWrite, "开始写入")
+UI_TEXT(kLogPhaseRead, "开始读取")
+UI_TEXT(kLogStopRequested, "用户点击了停止")
+UI_TEXT(kLogCleanedOldFiles, "已删除旧的测试文件 %1 个")
+UI_TEXT(kLogRoundCleanNext, "已删除上一圈的 %1 个测试文件，按当前剩余空间重新规划")
+UI_TEXT(kLogRoundSummary, "第 %1 圈结束：写入均速 %2，读取均速 %3")
+UI_TEXT(kLogRoundSummaryBad, "第 %1 圈结束：发现异常（%2）")
+UI_TEXT(kLogAllRoundsDone, "全部 %1 圈测试结束")
+UI_TEXT(kLogOneRoundDone, "测试结束")
+UI_TEXT(kLogErrorPrefix, "错误：%1")
+UI_TEXT(kLogWarnPrefix, "警告：%1")
+#ifdef Q_OS_WIN
+UI_TEXT(kIoModeTip_Win,
+        "IO 引擎固定为 windowsaio：Windows 上只有它支持 direct=1。\n"
+        "同步引擎（psync / sync）只能用缓冲 I/O，测到的是系统缓存而不是磁盘，故不提供。")
+#else
+UI_TEXT(kIoModeTip_Posix,
+        "Linux 上 direct=1 走的是 O_DIRECT，libaio / io_uring / psync 都支持。\n"
+        "默认优先用 libaio：只有异步引擎才能让 iodepth 真正生效，\n"
+        "性能项的 Q8T1 / Q32T1 靠它才测得准。\n"
+        "如果这份 fio 没有编 libaio，启动时会自动退回可用的那个引擎。")
+#endif
+UI_TEXT(kLabelIoMode, "IO 方式")
+UI_TEXT(kParamHint,
+        "测试会在目标分区的 ml_disktest 目录里生成 testfile_* 文件，"
+        "每个不超过 2 GiB。测试文件不会自动删除，"
+        "可以从「文件 → 清理测试文件」删掉。")
+UI_TEXT(kBlockSizeSeq, "4 MiB")
+UI_TEXT(kBlockSizeRand, "4 KiB")
+
+// ── 测试阶段 ──
+UI_TEXT(kPhaseRead, "读取阶段")
+UI_TEXT(kPhaseWrite, "写入阶段")
+UI_TEXT(kPhasePerf, "性能测试项")
+UI_TEXT(kGroupPhases, "测试阶段")
+UI_TEXT(kCheckWrite, "写入")
+UI_TEXT(kCheckRead, "读取")
+UI_TEXT(kCheckVerify, "校验")
+UI_TEXT(kBtnStart, "开始测试")
+UI_TEXT(kBtnStop, "停止")
+UI_TEXT(kReadNoFilesTip, "%1 里还没有测试文件。\n勾选「写入」或先跑一次写入，才能执行读取。")
+UI_TEXT(kReadAvailableTip, "%1 里已有测试文件，可以只执行读取。")
+UI_TEXT(kReadNeedWriteTip, "写入阶段结束后会生成测试文件，随后可以读回校验。")
+
+// ── 状态与卡片 ──
+UI_TEXT(kCardReadNow, "当前读取")
+UI_TEXT(kCardWriteNow, "当前写入")
+UI_TEXT(kCardReadAvg, "平均读取")
+UI_TEXT(kCardWriteAvg, "平均写入")
+UI_TEXT(kCardElapsed, "已用时")
+UI_TEXT(kCardState, "状态")
+UI_TEXT(kStatePreparing, "准备中")
+UI_TEXT(kStateWriting, "正在写入")
+UI_TEXT(kStateReading, "正在读取")
+UI_TEXT(kStateStopped, "已停止")
+
+// ── 图表 ──
+UI_TEXT(kGroupChart, "实时速度")
+UI_TEXT(kLabelPlotStyle, "绘图方式：")
+UI_TEXT(kPlotLine, "折线图")
+UI_TEXT(kPlotScatter, "散点图")
+UI_TEXT(kLabelDensity, "密度：")
+UI_TEXT(kDensityHigh, "高密度")
+UI_TEXT(kDensityLow, "低密度")
+UI_TEXT(kDensityLowTip,
+        "低密度：每 2 个像素列画 1 个点（约 200~2000 点），曲线明显更简、也更流畅。\n"
+        "折线用 LTTB 选点，大的起伏仍然保得住；要看每一个点请切回高密度。\n"
+        "保存的 CSV 与报告始终是全量数据，不受这里影响。")
+UI_TEXT(kDensityHighTip,
+        "高密度：每个采样点都画（最忠实，点数越多越吃绘制）。\n"
+        "点数特别多、界面发涩时，切到低密度会顺滑很多。")
+UI_TEXT(kSeriesRead, "读取速度")
+UI_TEXT(kSeriesWrite, "写入速度")
+UI_TEXT(kAxisCapacity, "容量（GiB）")
+UI_TEXT(kAxisSpeed, "速度（MiB/s）")
+
+// ── 状态栏 ──
+UI_TEXT(kModeElevated, "提权模式")
+UI_TEXT(kModeNormal, "普通模式")
+// "提权"在两个平台上的含义不一样：Windows 是管理员令牌，
+// Linux 上就是 euid == 0。Linux 下普通文件做 O_DIRECT 并不需要 root，
+// 所以这句话只能说"以 root 身份运行"，不能说"必须提权才能测"。
+#ifdef Q_OS_WIN
+UI_TEXT(kModeElevatedTip_Win, "当前以管理员身份运行，可以访问需要提权的设备。")
+UI_TEXT(kModeNormalTip_Win, "当前是普通权限。\n以管理员身份重新启动本程序即可进入提权模式。")
+#else
+UI_TEXT(kModeElevatedTip_Posix, "当前以 root 身份运行（euid 0）。")
+UI_TEXT(kModeNormalTip_Posix,
+        "当前是普通用户。\n"
+        "测试普通文件不需要 root；只有目标目录本身没有写权限时才需要。")
+#endif
+UI_TEXT(kStatusSelectDriveHint, "请先在「选择磁盘」列表里选中要测试的分区")
+UI_TEXT(kStatusCleanedFiles, "已清理 %1 个测试文件")
+UI_TEXT(kStatusRunDataSaved, "已保存 %1 个采样点与本次参数到 %2")
+UI_TEXT(kStatusSamplesLoaded, "已加载 %1 个采样点")
+UI_TEXT(kStatusSkippedLines, "（跳过 %1 行无法解析的数据）")
+UI_TEXT(kStatusDiagnosticsSaved, "诊断输出已保存到 %1")
+UI_TEXT(kStatusCleaningOldFiles, "正在清理旧的测试文件…")
+UI_TEXT(kStatusWriting, "正在写入…")
+UI_TEXT(kStatusReading, "正在读取…")
+UI_TEXT(kStatusStopping, "正在停止…")
+
+// ── 对话框与提示 ──
+UI_TEXT(kDlgChooseFioTitle, "选择 fio 可执行文件")
+#ifdef Q_OS_WIN
+UI_TEXT(kFilterExecutable_Win, "可执行文件 (*.exe);;所有文件 (*)")
+#else
+/// Linux 上可执行文件**没有扩展名** —— 随包发布的那个就叫 `fio`。
+/// 按 `*.exe` 过滤会把 fio 本身藏起来，对话框里一个文件都挑不到。
+/// 权限位（可执行）没法用名字通配符表达，所以这里只能放开成全部文件。
+UI_TEXT(kFilterExecutable_Posix, "所有文件 (*)")
+#endif
+UI_TEXT(kDlgCleanupTitle, "清理测试文件")
+UI_TEXT(kMsgConfirmCleanup, "将删除 %1 里的 %2 个测试文件，共 %3。\n\n确定继续吗？")
+UI_TEXT(kDlgSaveDataTitle, "保存测试数据")
+/// 默认文件名：ml_disktest-可靠性测试-20261012-183000.csv
+/// 段名直接用模式名，和时间戳一起构成"这份结果是什么、什么时候跑的"。
+UI_TEXT_RAW(kRunDataFileNameFmt, "ml_disktest-%1-%2.csv")
+/// 文件名里的时间戳：可排序、不含冒号（Windows 文件名不允许冒号）
+UI_TEXT_RAW(kRunDataTimeStampFmt, "yyyyMMdd-HHmmss")
+UI_TEXT(kFilterCsv, "CSV 文件 (*.csv);;所有文件 (*)")
+UI_TEXT(kDlgLoadDataTitle, "打开测试结果")
+UI_TEXT(kDlgSaveDiagnosticsTitle, "保存 fio 诊断输出")
+UI_TEXT(kFilterTextLog, "文本文件 (*.log *.txt);;所有文件 (*)")
+UI_TEXT(kAboutHtml,
+        "<h3>%1</h3>"
+        "<table cellspacing='0' cellpadding='3'>"
+        "<tr><td><b>版本</b></td><td>%2　（%10）</td></tr>"
+        "<tr><td><b>作者</b></td><td>%3</td></tr>"
+        "<tr><td><b>联系作者</b></td><td>%4</td></tr>"
+        "<tr><td><b>编译时间</b></td><td>%5</td></tr>"
+        "<tr><td><b>构建环境</b></td><td>Qt %6 · %7</td></tr>"
+        "</table>"
+        "<p>本工具基于fio，会在选中分区的 <code>%8</code> 目录里生成 "
+        "<code>%9_*</code> 文件进行测试，并读取校验。仅使用文件模式。"
+        "<p><b>感谢你使用本工具。</b>本工具尚在测试阶段，有不足的地方"
+        "请反馈。</p>"
+        // ── 开源软件声明：下面这段要改就整段改 ──
+        "<h4>开源软件声明</h4>"
+        "<p>本程序使用了以下开源软件，在此致谢。各软件的著作权归其各自"
+        "所有者，遵循其各自的许可协议：</p>"
+        "<table cellspacing='0' cellpadding='3'>"
+        "<tr><td><b>fio</b></td><td>GPL-2.0</td>"
+        "<td>Jens Axboe 等，<a href='https://github.com/axboe/fio'>"
+        "github.com/axboe/fio</a></td></tr>"
+        "<tr><td><b>Qt</b></td><td>LGPL-3.0</td>"
+        "<td>The Qt Company，<a href='https://www.qt.io'>qt.io</a></td></tr>"
+        "</table>"
+        "<p>本程序仅调用 fio，未对 fio 做任何修改；"
+        "Qt 为动态链接，随程序一起分发的 Qt 运行库可自行替换。</p>"
+        "<p>本项目是开源项目，使用GPL3.0许可证"
+        "开源地址：https://github.com/FlowerZiCON/disktest_fio</p>"
+        "<p>完整许可条款随程序一起分发，见程序目录的 <code>licenses</code> 子目录："
+        "<code>fio-COPYING.txt</code>（fio）、<code>Qt-LGPLv3.txt</code>（Qt）。</p>")
+UI_TEXT(kDlgAboutTitle, "关于")
+/// "关于"里的"检查更新"按钮：点了就用系统浏览器打开 release 页
+UI_TEXT(kBtnCheckUpdate, "检查更新")
+UI_TEXT_RAW(kReleasesLatestUrl, "https://github.com/FlowerZiCON/disktest_fio/releases/latest")
+UI_TEXT(kTextNoneInParens, "(无)")
+UI_TEXT(kMsgPhaseProblem, "%1 发现异常")
+UI_TEXT(kMsgTestStoppedSuffix, "\n\n测试已停止。")
+
+// 打开「写入」时如果目标分区里已有测试文件，先问一句要不要覆盖
+UI_TEXT(kDlgOverwriteTitle, "目标分区里已有测试文件")
+UI_TEXT(kMsgOverwriteBody,
+        "目标分区 %1 的测试目录里已经有 %2 个测试文件，合计 %3。\n\n"
+        "继续写入会先删除这些旧文件，再重新完整写一遍。\n\n"
+        "确定继续吗？")
+UI_TEXT(kBtnContinue, "继续")
+UI_TEXT(kBtnCancel, "取消")
+UI_TEXT(kBtnClose, "关闭")
+
+// 中途停止时的提示与日志
+UI_TEXT(kLogStoppedWriteCleaned, "[停止] 写入没有跑完，盘上是不完整的数据，已删除测试文件")
+UI_TEXT(kLogStoppedWriteCleanFailed, "[停止] 写入没有跑完，但删除测试文件失败：%1")
+UI_TEXT(kLogOverwriteCancelled, "[取消] 目标分区里已有测试文件，用户选择不覆盖")
+
+// ── 错误信息 ──
+UI_TEXT(kErrNeedDrive, "请先在「选择磁盘」列表里选中要测试的分区。")
+UI_TEXT(kErrNoTestFolder, "无法确定测试目录。")
+UI_TEXT(kErrNeedOnePhase, "「写入」和「读取」至少要勾选一个。")
+UI_TEXT(kErrRoundsTooSmall, "测试圈数至少为 1。")
+UI_TEXT(kErrIodepthTooSmall, "队列深度至少为 1。")
+UI_TEXT(kErrTargetUnavailable, "目标分区不可用：%1")
+UI_TEXT(kErrReadCapacity, "无法读取 %1 的容量信息。")
+UI_TEXT(kErrNoDriveSelected, "没有选中分区")
+UI_TEXT(kErrNoDriveSelectedDetail, "请先在「选择磁盘」列表里选中一个分区。")
+UI_TEXT(kErrStopBeforeCleanup, "请先点「停止」再清理。")
+UI_TEXT(kErrBusy, "正在测试中")
+UI_TEXT(kErrNoTestFiles, "没有测试文件")
+UI_TEXT(kErrNoTestFilesInFolder, "%1 里没有 testfile_* 文件。")
+UI_TEXT(kErrCleanupFailed, "清理失败")
+UI_TEXT(kErrNoDataToSave, "没有可保存的数据")
+UI_TEXT(kErrNoSamplesYet, "还没有跑过测试，或者没有采到任何采样点。")
+UI_TEXT(kErrLoadDataFailed, "打开测试结果失败")
+/// 结果文件版本过旧：%1 = 文件路径，%2 = 文件自己的版本，%3 = 本程序要求的最低版本
+UI_TEXT(kErrRunDataTooOld,
+        "这份结果的版本过旧，本程序不再支持。\n\n"
+        "文件：%1\n"
+        "文件版本：%2\n"
+        "本程序要求：%3 及以上\n\n"
+        "请用当前版本重新跑一次测试并保存。")
+/// 同上，但文件里根本没写版本（2.2.7 之前存的都没有）
+UI_TEXT(kErrRunDataTooOldNoVersion,
+        "这份结果的版本过旧，本程序不再支持。\n\n"
+        "文件：%1\n"
+        "文件版本：未记录（%2 之前的版本存的文件都不写版本号）\n\n"
+        "请用当前版本重新跑一次测试并保存。")
+UI_TEXT(kMsgBadCsvHeader, "%1\n第一行应当是 \"# %2\"，并且含 [samples] 数据段。")
+/// 格式和版本都对，但一个采样行都没解析出来（数据段为空、或者整段坏掉）。
+/// 这和"第一行不是标记"是两件事，分开说才不会把人引向错误的排查方向。
+UI_TEXT(kErrRunDataNoSamples,
+        "%1\n文件里有 [samples] 数据段，但没有任何一行能解析成采样点"
+        "（跳过了 %2 行）。\n文件可能已损坏，或者不是本程序保存的结果。")
+UI_TEXT(kErrBusyLoading, "正在测试中，请先点「停止」再加载历史数据。")
+/// 目标是裸设备 / 物理磁盘路径。本工具只做文件模式，这类路径一律拒绝。
+UI_TEXT(kErrTargetIsRawDevice,
+        "目标不能是裸设备或物理磁盘：\n%1\n\n"
+        "本工具只在普通文件上做测试，请选择一个分区里的可写目录。")
+/// 覆盖/清理确认框里补一句：除了测试文件，还有 fio 留下的校验状态文件会被删。
+/// %1 = 个数，%2 = 合计大小
+UI_TEXT(kMsgAlsoStateFiles, "\n另外还会删除 %1 个 fio 校验状态文件（%2）。")
+UI_TEXT(kErrNoContentToSave, "没有可保存的内容")
+UI_TEXT(kErrNoOutputYet, "还没有跑过测试，或者 fio 没有产生输出。")
+UI_TEXT(kErrDeleteOldFiles, "无法删除旧文件：%1")
+UI_TEXT(kErrCreateFolder, "无法创建测试目录：%1")
+UI_TEXT(kMsgSelfTestTargetMismatch,
+        "自检指定的是 %1，但当前选中的是 %2。\n"
+        "已中止，没有写入任何数据。")
+UI_TEXT(kErrTargetMismatch, "目标分区不匹配")
+UI_TEXT(kErrBadParams, "参数有误")
+UI_TEXT(kErrFioNotFound, "找不到 fio")
+#ifdef Q_OS_WIN
+UI_TEXT(kErrSpecifyFioPath_Win, "请先指定 fio.exe 的路径。")
+#else
+UI_TEXT(kErrSpecifyFioPath_Posix, "请先指定 fio 的路径。")
+#endif
+UI_TEXT(kErrNoTestFilesForRead,
+        "%1 里没有 testfile_* 文件，无法单独执行读取。\n"
+        "请先勾选「写入」跑一次。")
+UI_TEXT(kErrReadCapacityFailed, "读取容量失败")
+UI_TEXT(kErrNoSpace, "空间不足")
+UI_TEXT(kErrNoWritableSpace, "目标分区剩余 %1，没有可写的空间。")
+UI_TEXT(kErrCleanupOldFailed, "清理旧文件失败")
+UI_TEXT(kErrCreateFolderFailed, "创建测试目录失败")
+UI_TEXT(kErrCreateJobFile, "无法创建 job 文件")
+UI_TEXT(kErrStartWritePhase, "启动写入阶段失败")
+UI_TEXT(kErrNoTestFilesAtReadStart, "读取阶段开始时 %1 里没有 testfile_* 文件。")
+UI_TEXT(kErrStartReadPhase, "启动读取阶段失败")
+
+// ── fio 运行与告警 ──
+UI_TEXT(kProblemOpenFailed, "fio 报告有文件打开失败（failed to open）")
+UI_TEXT(kProblemIoUnitError, "fio 报告 I/O 单元错误（io_u error）")
+UI_TEXT(kProblemPermissionDenied, "fio 报告权限不足（Permission denied）")
+UI_TEXT(kProblemNoSpaceLeft, "目标分区空间不足（No space left on device）")
+UI_TEXT(kProblemBadOption, "fio 拒绝了某个选项（Bad option）")
+UI_TEXT(kProblemJobGlobalDropped, "fio 丢弃了 job 里的全局选项（job global dropped）")
+UI_TEXT(kProblemCannotOpen, "fio 无法打开目标（cannot open）")
+UI_TEXT(kProblemBadMagicHeader, "★ 数据校验失败：块的校验头不匹配，磁盘上的内容与写入时不一致")
+UI_TEXT(kProblemVerifyFailed, "★ 数据校验失败（verify failed）")
+UI_TEXT(kProblemIllegalByteSequence, "★ I/O 返回非法字节序列，通常是校验不一致")
+
+// ── 校验失败的大字告警（测试阶段显示在右侧图表区上方）──
+/// 唯一的一行：最要紧的一句。%1 = 已经发现的坏块数
+UI_TEXT(kVerifyBannerHead, "⚠ 数据校验失败：已发现 %1 处不一致")
+/// 第二行：只说结论和该做什么，不摆 fio 原话——偏移量在日志里有逐处明细。
+UI_TEXT(kVerifyBannerNote, "该磁盘存在问题，请尽快备份数据并更换该盘。")
+/// 结果窗口专用：文件里的坏块计数**读不出来**（字段坏了）。
+/// 这一种不能按"0 处"处理——那等于把"这块盘坏了"的结论抹掉。
+UI_TEXT(kVerifyCountUnreadable, "⚠ 数据校验结果无法读取：结果文件里的坏块计数已损坏")
+UI_TEXT(kVerifyCountUnreadableNote, "无法判断当时有没有发现坏块，建议用当前版本重新测试一次。")
+/// 结果窗口专用：告警说 N 处，但文件里只留下了前几条明细时补一句。
+/// %1 = 明细条数，%2 = 记录的总处数
+UI_TEXT(kResultVerifyDetailsShort, "（结果文件里只留下了前 %1 处明细，当时记录的总数是 %2 处）")
+/// 日志里每发现一块坏块记一行：%1 = 第几块，%2 = fio 原话
+UI_TEXT(kLogVerifyFailure, "校验失败第 %1 处：%2")
+/// 阶段结束时把总数写进日志：%1 = 总块数
+UI_TEXT(kLogVerifySummary, "★ 本阶段共发现 %1 处数据校验失败")
+/// 逐处明细被截断时补一句：%1 = 记了多少条，%2 = 总共多少处
+UI_TEXT(kLogVerifyTruncated, "（上面只列出前 %1 处，本次共 %2 处）")
+/// 图表上能标的坏块位置到了上限：%1 = 上限，%2 = 没标出来的处数
+UI_TEXT(kLogVerifyMarkersTruncated,
+        "（图表上最多标 %1 处坏块位置，本次还有 %2 处没在图上标出来；"
+        "运行日志与保存的结果文件里是全的）")
+UI_TEXT(kLogVerifyNone, "数据校验通过：没有发现不一致的块")
+/// 一个阶段跑完了，却既没有采样点、也没有 fio 的读写汇总：很可能**什么都没测**。
+/// 实测：测试目录里残留的文件比块大小还小，fio 一次 I/O 都没发，退出码却是 0，
+/// 于是"什么都没测"看起来和"测过了没问题"一模一样。只写日志、不改结论 ——
+/// 汇总的解析依赖 fio 的输出格式，拿它去判 FAIL 有可能误伤好盘。
+UI_TEXT(kLogPhaseDidNothing,
+        "★ %1没有产生任何 I/O（既没有采样，也没有 fio 汇总）——"
+        "这一阶段很可能什么都没测到：请确认测试文件完整、且大于块大小。")
+/// 报告里的校验失败行：%1 = 第几处，%2 = fio 原话
+UI_TEXT(kReportVerifyLine, "*** 数据校验失败第 %1 处: %2")
+UI_TEXT(kStatusVerifyFailed, "★ 已发现 %1 处数据校验失败")
+/// 自检报告里的校验失败统计
+UI_TEXT(kReportVerifyCount, "  校验失败块数      : ")
+UI_TEXT(kReportVerifyFirst, "  首处失败原话      : ")
+UI_TEXT(kReportVerifyWhere, "      · ")
+UI_TEXT(kReportVerifyTruncated, "      （上面只列出前 %1 处，本次共 %2 处）")
+/// 开发排查：强制显示告警条时的标记（必须在界面和日志里说明这是伪造的）
+UI_TEXT(kLogDebugBannerForced, "【开发排查】校验失败告警条是**强制显示**的示例，不是本次真实结果")
+UI_TEXT(kDebugBannerTitleSuffix, "  [告警条为示例]")
+UI_TEXT(kErrNoTempDir, "找不到可写的临时目录。")
+UI_TEXT(kErrWriteJobFile, "无法写入 job 文件：\n%1\n%2")
+UI_TEXT(kErrPhaseRunning, "已经有一个阶段在运行。")
+UI_TEXT(kErrFioNotSpecified, "找不到 fio 可执行文件，请在界面上指定路径。")
+UI_TEXT(kFioWorkingDir, "  (工作目录: %1)")
+UI_TEXT(kErrFioStartFailed, "无法启动 fio：%1")
+UI_TEXT(kFioIocounterUnavailable, "提示：无法读取 fio 进程 I/O 计数，实时曲线将不可用。")
+UI_TEXT(kFioUserStop, "… 用户请求停止")
+UI_TEXT(kFioTestFinished, "… 测试已结束（%1），停止采样")
+UI_TEXT(kFioJobEnded, "fio 报告 job 已结束")
+UI_TEXT(kFioSummaryPrinted, "fio 已输出汇总")
+
+// ── 自检报告 ──
+UI_TEXT(kReportDataSaved, "测试数据已保存: %1")
+UI_TEXT(kReportLoadData, "打开测试结果: %1")
+UI_TEXT(kReportLoadedConfig, "  模式=%1  块大小=%2  iodepth=%3  校验=%4")
+UI_TEXT(kReportLoadedMode, "  这份数据是：%1")
+UI_TEXT(kReportTestStart, "=========== 测试开始 ===========")
+UI_TEXT(kReportConfig, "配置: %1")
+UI_TEXT(kReportTargetFolder, "目标目录: %1")
+UI_TEXT(kReportReadOnlyMode, "只读模式：使用已有的 %1 个测试文件（合计 %2）")
+UI_TEXT(kReportVolumeSpace, "分区容量 %1，剩余 %2，安全余量 %3")
+UI_TEXT(kReportWritePlan, "计划写入 %1 个文件 × %2 = %3（文件由 fio 边写边建，不预分配）")
+UI_TEXT(kReportAxisFixed, "横轴固定为 0 ~ %1（按测试容量，不再随时间扩展）")
+UI_TEXT(kReportWriteJobHeader, "-------------------- 写入 job --------------------")
+UI_TEXT(kReportReadPhaseFiles, "读取阶段：%1 个文件，合计 %2")
+UI_TEXT(kReportReadJobHeader, "-------------------- 读取 job --------------------")
+UI_TEXT(kReportWarningLine, "*** 警告: %1")
+UI_TEXT(kReportTestEnd, "=========== 测试结束 ===========")
+UI_TEXT(kReportTestPartition, "测试位置: %1")
+UI_TEXT(kReportRwMode, "读写模式: %1")
+UI_TEXT(kReportFioExitCode, "  fio 退出码: %1")
+UI_TEXT(kReportSampleWindow, "  采样点数: %1  窗口 %2 秒")
+UI_TEXT(kReportReadAvgMinMax, "  平均读取: %1   (min %2 / max %3)")
+UI_TEXT(kReportWriteAvgMinMax, "  平均写入: %1   (min %2 / max %3)")
+UI_TEXT(kReportNoSamples, "  注意: 本阶段没有可用采样点（只跑了一拍，首拍已被丢弃）")
+UI_TEXT(kReportWarning, "  警告: %1")
+UI_TEXT(kReportVerdictBad, "结论: 发现异常，请查看上面的警告")
+UI_TEXT(kReportVerdictOk, "结论: 正常")
+UI_TEXT(kReportVerdictStopped, "结论: 已手动停止")
+UI_TEXT(kSelfTestDataSaved, "[自检] 测试数据已保存: %1")
+UI_TEXT(kSelfTestSaveFailed, "[自检] 保存测试数据失败: %1")
+UI_TEXT(kReportError, "[错误] %1")
+UI_TEXT(kSelfTestLoadFailed, "[自检] 打开测试结果失败: %1")
+UI_TEXT(kSelfTestTargetNotFound, "找不到目标分区：自检指定的是 %1。")
+UI_TEXT(kTextUnspecified, "(未指定)")
+UI_TEXT(kSelfTestPrefix, "[自检] ")
+UI_TEXT(kSelfTestEnumerated, "  枚举到: ")
+UI_TEXT(kSelfTestBegin, "[自检] 开始无人值守自检…")
+UI_TEXT(kSelfTestPlanLine, "    剩余 %1 → %2 个 × %3 = %4  %5")
+UI_TEXT(kSelfTestViolation, "*** 违规 ***")
+UI_TEXT(kSelfTestPlanInvalid, "    剩余 %1 → 计划无效（空间不足）")
+UI_TEXT(kSelfTestStepLine, "    %1  %2")
+UI_TEXT(kPhaseNameWrite, "写入")
+UI_TEXT(kPhaseNameRead, "读取")
+UI_TEXT(kTextNone, "无")
+UI_TEXT(kTextNotObserved, "(没观察到)")
+
+// ── 自检报告正文 ──
+UI_TEXT(kReportTitle, "==================== 硬盘可靠性测试工具 自检报告 ====================\n")
+UI_TEXT(kReportQtVersion, "Qt 版本            : ")
+UI_TEXT(kReportQpaPlatform, "QPA 平台插件        : ")
+UI_TEXT(kReportFioVersion, "fio 版本            : ")
+UI_TEXT(kReportTargetPartition, "目标目录            : ")
+UI_TEXT(kReportTestFolder, "测试目录            : ")
+UI_TEXT(kReportTestConfig, "测试配置            : ")
+UI_TEXT(kReportRounds, "测试圈数            : ")
+UI_TEXT(kReportDataSource, "数据来源            : 加载自 ")
+UI_TEXT(kReportNotRealtime, "（不是本次实时采集）\n")
+UI_TEXT(kReportStartupError, "启动/运行错误       : ")
+UI_TEXT(kReportVolumeList, "枚举到的磁盘/分区  :")
+/// 紧接着那一行只是说明"下面缩进的行分别是什么"，不是个数
+UI_TEXT(kReportDiskListNote, "（磁盘一行，其下缩进的是它的文件系统）\n")
+/// 被规则排除掉的卷（网络驱动器 / 内存盘 / 没有物理磁盘的映射盘）
+UI_TEXT(kReportIgnoredList, "已忽略的驱动器      : ")
+UI_TEXT(kIgnoredListTip, "已忽略：%1\n（网络驱动器、内存盘、以及没有对应物理磁盘的映射盘一律不列）")
+UI_TEXT(kReportSuffixCount, " 个\n")
+UI_TEXT(kReportPhaseList, "阶段                : ")
+UI_TEXT(kReportFillLimit, "填充上限(自检)      : ")
+UI_TEXT(kReportFilePlanHead, "文件计划            : ")
+UI_TEXT(kReportSuffixTimes, " 个 × ")
+UI_TEXT(kReportExistingFiles, "已有测试文件        : ")
+UI_TEXT(kReportPhaseExitCode, "  fio 退出码        : ")
+UI_TEXT(kReportCancelledTag, "（已取消）")
+UI_TEXT(kReportPhaseSamples, "  采样点数          : ")
+UI_TEXT(kReportWindowPrefix, "  窗口 ")
+UI_TEXT(kReportSuffixSeconds, " 秒\n")
+UI_TEXT(kReportReadMinAvgMax, "  读取 MiB/s        : min=%1 avg=%2 max=%3\n")
+UI_TEXT(kReportWriteMinAvgMax, "  写入 MiB/s        : min=%1 avg=%2 max=%3\n")
+UI_TEXT(kReportSummaryRead, "  fio 汇总 读取     : ")
+UI_TEXT(kReportSummaryWrite, "  fio 汇总 写入     : ")
+UI_TEXT(kReportPhaseWarnings, "  告警              : ")
+UI_TEXT(kReportPlotStyle, "绘图方式            : ")
+UI_TEXT(kReportSamplePoints, "采样点数            : ")
+UI_TEXT(kReportLineSeries, "  折线序列=")
+UI_TEXT(kReportScatterSeries, "  散点序列=")
+UI_TEXT(kReportSkippedFirst, "忽略的首拍          : ")
+UI_TEXT(kReportSkippedFirstNote, " 个（每个阶段的第 1 拍含 fio 启动开销，已丢弃）\n")
+UI_TEXT(kReportAxisHead, "横轴                : 固定 0 ~ ")
+UI_TEXT(kReportAxisMid, "（按测试容量）；曲线首点 x=")
+UI_TEXT(kReportAxisLastX, " GiB，末点 x=")
+UI_TEXT(kReportAxisTimeFmt, "横轴                : 固定 0 ~ %1 秒（按时间）；曲线首点 x=%2 秒，末点 x=%3 秒\n")
+UI_TEXT(kReportCardCurrentRead, "结束时卡片          : 当前读=")
+UI_TEXT(kReportCardCurrentWrite, "  当前写=")
+UI_TEXT(kReportCardAvgRead, "  平均读=")
+UI_TEXT(kReportCardAvgWrite, "  平均写=")
+UI_TEXT(kReportCardElapsed, "  已用时=")
+UI_TEXT(kReportEndChecks, "结束时勾选          : 写入=%1  读取=%2  校验=%3\n")
+UI_TEXT(kReportStateEnd, "状态标签            : 结束时=")
+UI_TEXT(kReportStateObserved, "   运行期间出现过=")
+UI_TEXT(kReportGuardRawDevice, "裸设备路径拦截      : ")
+UI_TEXT(kReportGuardSyncEngine, "同步引擎分类        : ")
+/// 裸设备路径必须被 validate() **真的拒掉**（不只是"检测函数算得对"）
+UI_TEXT(kReportGuardRawReject, "裸设备路径被拒      : ")
+/// 校验失败必须让这一阶段判成"有问题"（坏盘不能被判成合格）
+UI_TEXT(kReportGuardVerifyVerdict, "校验失败即不合格    : ")
+/// 测试文件名的判据（testfile_<数字>）—— 清理路径靠它决定删什么
+UI_TEXT(kReportGuardTestFileName, "测试文件名判据      : ")
+UI_TEXT(kReportGuardWindowIcon, "窗口图标            : ")
+UI_TEXT(kReportGuardAutoStep, "抽稀（LTTB 保尖峰）: ")
+UI_TEXT(kReportGuardExclusive, "单选互斥（绘图方式/密度）: ")
+UI_TEXT(kReportExclusiveNote, "（任何时刻恰好一个被选中）\n")
+UI_TEXT(kReportGuardFilePlan, "文件规划（每个 ≤2GiB）: ")
+UI_TEXT(kReportFilesPresent, "测试文件已生成      : ")
+UI_TEXT(kReportGuardLoadedData, "加载数据            : ")
+UI_TEXT(kReportLoadedDataNote, " 个采样点）\n")
+UI_TEXT(kReportGuardResultWindow, "结果窗口            : ")
+UI_TEXT(kReportResultWindowItem, "（独立窗口打开 OK，当前显示项 = %1）")
+UI_TEXT(kReportLoadedModeGuard, "结果数据模式判别    : ")
+/// 启动默认值与 fio 查找规则的断言
+UI_TEXT(kReportGuardDefaults, "启动默认值          : ")
+UI_TEXT(kReportDefaultsDetail, "（可靠性 · 不选盘 · 顺序读写 · iodepth=%1 · 1 圈 · 写入/读取/校验全开 · 性能四项全勾 · 数据 %2 MiB）")
+UI_TEXT(kReportGuardFioLookup, "fio 查找规则        : ")
+UI_TEXT(kReportFioLookupDetail, "（只看程序目录 → 再走 PATH，不扫盘；当前 = %1）")
+UI_TEXT(kReportLoadedItemsFmt, "；分出的测试项 = %1 项")
+UI_TEXT(kReportGuardPerfItems, "性能四项读写值      : ")
+UI_TEXT(kSelfTestResultWindowFailed, "[自检] 结果窗口打开失败（同一份 CSV 灌主窗口是成功的，说明问题在窗口这一侧）")
+UI_TEXT(kReportGuardProblems, "问题检查            : ")
+UI_TEXT(kReportNoProblems, "PASS（无告警、job err 全 0）")
+UI_TEXT(kReportRawOutput, "fio 原始输出        : ")
+UI_TEXT(kReportCsvOutput, "逐点采样 CSV        : ")
+UI_TEXT(kReportChartPng, "图表 PNG            : ")
+UI_TEXT(kReportWindowPng, "整窗 PNG            : ")
+UI_TEXT(kReportVerdict, "自检结论            : ")
+UI_TEXT(kReportStoppedTag, "（含手动停止）")
+
+// ── 命令行帮助 ──
+UI_TEXT(kAppDescription, "基于 fio 的硬盘可靠性测试工具（只做文件模式测试）")
+UI_TEXT(kClSelfTest, "无人值守自检：跑一轮完整测试并把报告写到 --outdir。")
+UI_TEXT(kClOutDir, "自检输出目录（默认 ./_selftest）")
+#ifdef Q_OS_WIN
+UI_TEXT(kClFioPath_Win, "指定 fio.exe 的路径")
+UI_TEXT(kClTarget_Win, "自检用的目标分区，例如 G:/")
+#else
+UI_TEXT(kClFioPath_Posix, "指定 fio 的路径")
+UI_TEXT(kClTarget_Posix, "自检用的目标挂载点，例如 /（或 /mnt/disk）")
+#endif
+UI_TEXT(kClFillLimit, "自检时把“写满分区”的目标压到这么多 MiB（真写满大盘太慢）")
+UI_TEXT(kClMode, "自检用的读写模式：seq / rand")
+UI_TEXT(kClStopAfter, "自检时在第 N 秒触发一次「停止」，验证停止路径")
+UI_TEXT(kClScatter, "自检时把绘图方式切到散点图（默认折线图）")
+UI_TEXT(kClReadOnly, "自检时只跑读取阶段（验证「有文件才能只读」）")
+UI_TEXT(kClLowDensity, "自检时把折线图切到低密度（按屏幕像素抽稀）")
+UI_TEXT(kClSaveData, "自检跑完后把测试数据保存到这个 CSV")
+UI_TEXT(kClLoadData, "自检直接加载这个 CSV 画图并出报告，不跑测试")
+UI_TEXT(kClLang, "界面语言：zh_CN / zh_TW / en（默认跟随系统，也可以从「帮助 → 语言」里换）")
+UI_TEXT(kClSelftestRounds, "自检的测试圈数（整轮重复几遍）")
+UI_TEXT(kClSelftestPerf, "自检跑性能模式（四个测试项，每项 10 秒）")
+UI_TEXT(kClPerfSizeArg, "自检性能模式的数据大小（MiB）")
+UI_TEXT(kClDebugBanner, "开发排查：强制显示校验失败告警条（界面会标明是示例）")
+/// --i18n-check 的输出（开发/翻译用，故意只用 ASCII 标签）
+UI_TEXT(kClI18nCheck, "检查界面译文的覆盖率与占位符，查完退出（退出码 0 = 全部通过）")
+
+// ── 通用文本（跨区域共用） ──
+UI_TEXT(kTextUnknown, "未知")
+UI_TEXT(kTextSaveFailed, "保存失败")
+// 下面几个是非 ASCII 但非汉字的符号，统一放这里免得散在代码里
+UI_TEXT(kTextWarningCount, "%1 × %2")  ///< 告警重复次数后缀
+UI_TEXT(kTextJoinDot, " · ")       ///< 一句话里各段之间的分隔
+UI_TEXT(kTextTitleColon, "%1：%2")   ///< "标题：内容"（全角冒号）
+UI_TEXT(kTextArrow, " → ")       ///< 阶段/状态的箭头连接
+UI_TEXT(kTextParenOpen, "（")        ///< 报告里的左括号
+
+// 阶段标题：多圈时带上圈号，例如 "--- 第 2 圈 · 写入阶段 ---"
+UI_TEXT(kPhaseHeadFmt, "--- %1 ---")
+UI_TEXT(kRoundTagFmt, "第 %1 圈 · ")
+// ── 模式与性能测试 ──
+UI_TEXT(kModeNameReliability, "可靠性测试")
+UI_TEXT(kModeNamePerformance, "性能测试")
+UI_TEXT(kModeReliabilityTip, "把选中分区写满，再读回逐块校验，用来发现坏块和静默数据损坏。")
+UI_TEXT(kModePerformanceTip, "先建好测试文件，再依次跑四个测试项，每项固定 10 秒，测读/写吞吐。")
+// 四个测试项
+UI_TEXT(kPerfSeqQ8T1, "顺序读写 Q8T1")
+UI_TEXT(kPerfSeqQ1T1, "顺序读写 Q1T1")
+UI_TEXT(kPerfRandQ32T1, "随机读写 Q32T1")
+UI_TEXT(kPerfRandQ1T1, "随机读写 Q1T1")
+UI_TEXT(kGroupPerfItems, "测试项（每项固定 %1 秒）")
+UI_TEXT(kLabelPerfSize, "测试数据大小")
+UI_TEXT(kPerfSizeTip, "测试文件会按这个大小事先建好（固定单文件，不分片）。")
+/// 性能测试的配置摘要：%1 = 模式名，%2 = 数据大小，%3 = 引擎，%4 = 每一项的秒数
+UI_TEXT(kPerfDescribeFmt, "%1  数据 %2  %3 直接IO  每项 %4 秒")
+UI_TEXT(kPerfColRead, "读取 (MiB/s)")
+UI_TEXT(kPerfColWrite, "写入 (MiB/s)")
+UI_TEXT(kWindowTitleFmt, "%1 %2 -%3")
+UI_TEXT(kChartPlaceholder, "请先点击「开始测试」")
+UI_TEXT(kChartTitleTime, "时间（秒）")
+UI_TEXT(kChartTitleCapacity, "测试容量（GiB）")
+
+// ── 测试结果窗口（打开历史 CSV 用，完全不碰主界面）──
+UI_TEXT(kResultWindowTitleFmt, "%1 - %2")
+UI_TEXT(kResultModeLabelFmt, "测试模式：%1")
+UI_TEXT(kResultSourceFmt, "数据来源：%1")
+UI_TEXT(kResultSummaryTarget, "目标分区")
+UI_TEXT(kResultSummaryMode, "读写模式")
+UI_TEXT(kResultSummaryBlock, "块大小")
+UI_TEXT(kResultSummaryRounds, "测试圈数")
+UI_TEXT(kResultSummarySamples, "采样点数")
+UI_TEXT(kResultSummaryElapsed, "已用时")
+UI_TEXT(kResultSummaryAvgRead, "平均读取")
+UI_TEXT(kResultSummaryAvgWrite, "平均写入")
+/// 性能结果的均速：统计的是**整轮采样**（顺序项 + 随机项都在里面），
+/// 所以带上"顺序"二字——性能测试各项的读写模式由测试项决定，
+/// 笼统写"平均读取"会让人以为整轮都是顺序的。
+UI_TEXT(kResultSummarySeqRead, "平均顺序读取")
+UI_TEXT(kResultSummarySeqWrite, "平均顺序写入")
+UI_TEXT(kResultSummaryData, "测试数据")
+UI_TEXT(kResultSummaryPlan, "文件计划")
+UI_TEXT(kResultPerfHint,
+        "四条曲线分别对应四个测试项。点某一行下面的数字格子，"
+        "图表里就只显示那一项的读写曲线；再点一次恢复显示全部。")
+UI_TEXT(kResultReliabilityHint, "曲线横轴是已处理容量，红色为读取、蓝色为写入。")
+UI_TEXT(kResultLegacyModeNote, "（老文件未记录测试模式，按可靠性数据渲染）")
+// 结果窗口里的坏块提示**直接复用实时告警条那两句**
+// （kVerifyBannerHead + kVerifyBannerNote）：同一件事不该有两套措辞。
+UI_TEXT(kResultShowOneFmt, "只显示：%1")
+UI_TEXT(kResultPerfItemFmt, "%1 读 %2 / 写 %3")
+UI_TEXT(kResultPerfNoItemNote,
+        "这份性能数据没有记录每一项的归属（老格式），只能画一条读/写合计曲线。"
+        "重新跑一次性能测试并保存，就能按测试项分别回看。")
+UI_TEXT(kLogPerfItemStart, "%1 开始（每趟 %2 秒，读写各一趟）")
+UI_TEXT(kLogPerfAllDone, "全部 %1 项测试结束")
+UI_TEXT(kLogPerfCleanup, "性能测试结束，已删除测试文件")
+UI_TEXT(kStatusFinishedFinal, "测试结束")
+UI_TEXT(kStatusStoppedFinal, "已停止（测试文件已清理）")
+UI_TEXT(kTargetPerfPlanFmt, "\n测试数据: 单个文件 %1")
+UI_TEXT(kStatusPerfPass, "正在测试：%1 · %2")
+UI_TEXT(kLogPerfPassStart, "%1 · %2 开始（%3 秒）")
+UI_TEXT(kLogDroppedTail, "丢弃本阶段最后一拍（必然横跨收尾，速率偏低）：%1")
+UI_TEXT(kMsgFat32TooBigTitle, "测试数据太大")
+UI_TEXT(kErrFat32TooBig,
+        "目标分区 %1 是 FAT 文件系统（FAT32 / vfat），单个文件最大只能到 4 GiB。\n\n"
+        "测试数据大小选了 %2，单文件放不下。\n\n"
+        "请改成 4 GiB 及以下，或者换一个支持大文件的文件系统"
+        "（NTFS / exFAT / ext4 / xfs 都可以）。")
+UI_TEXT(kLogPreallocating, "正在预建测试文件：%1 个 × %2")
+UI_TEXT(kLogPreallocated, "测试文件已就绪，合计 %1")
+UI_TEXT(kErrPerfNoItem, "请至少勾选一个测试项。")
+UI_TEXT(kErrPerfDataSize, "测试数据大小必须大于 0。")
+UI_TEXT(kModeGroupTitle, "测试模式")
+UI_TEXT(kLogPreparingFiles, "准备中：正在预建测试文件 %1/%2")
+UI_TEXT(kLogPerfPassDone, "%1 %2 完成：%3")
+UI_TEXT(kTraceShownTip, "右边图表显示的是 %1 的读写曲线")
+UI_TEXT(kTraceNoData, "这一项还没有数据。")
+UI_TEXT(kTraceBusyTip, "测试进行中，结束后才能查看明细。")
+UI_TEXT(kTraceClickTip, "点击在右边图表里显示这一项的读写曲线")
+UI_TEXT(kErrPerfNoSpace, "目标分区剩余 %1，放不下 %2 的测试数据。")
+UI_TEXT(kErrPreallocFailed, "预建测试文件失败")
+/// Linux：tmpfs / overlayfs 之类不支持 O_DIRECT 的文件系统上，direct=1 的 job
+/// 会以 "Operation not supported" 失败。这句话要在开测前就说清楚，
+/// 否则用户只会看到一行 fio 报错，很难联想到是文件系统的问题。
+UI_TEXT(kMsgNoDirectIoTitle, "文件系统不支持直接 I/O")
+UI_TEXT(kErrNoDirectIo,
+        "测试目录 %1 所在的文件系统不支持直接 I/O（O_DIRECT）：%2\n\n"
+        "本工具固定用 direct=1 绕过系统缓存，测的才是磁盘本身。\n"
+        "tmpfs、overlayfs 这类文件系统（/dev/shm、/run、容器里的根目录）\n"
+        "不支持它，请换一个真实磁盘上的目录（ext4 / xfs / btrfs 都支持）。")
+UI_TEXT(kLogPerfAllPlanned, "共 %1 项，预计 %2 秒")
+UI_TEXT(kErrCreateJobFailed, "无法创建 job 文件")

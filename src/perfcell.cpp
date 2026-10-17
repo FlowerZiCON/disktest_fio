@@ -67,7 +67,7 @@ void PerfCell::setClickable(bool clickable)
 {
     m_clickable = clickable;
     setCursor(clickable ? Qt::PointingHandCursor : Qt::ArrowCursor);
-    setToolTip(clickable ? kTraceClickTip : kTraceBusyTip);
+    setToolTip(clickable ? kTraceClickTip() : kTraceBusyTip());
 }
 
 void PerfCell::mousePressEvent(QMouseEvent *event)

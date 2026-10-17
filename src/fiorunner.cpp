@@ -99,30 +99,37 @@ bool parseEtaState(const QString &line, QString *state)
 struct ProblemPattern
 {
     const char *needle;
-    QString     label;
+    /// 取标签的**函数**而不是标签本身：界面文案是运行时按当前语言查出来的，
+    /// 而这张表曾经是命名空间作用域的静态数组 —— 那会在 main() 之前就把
+    /// 中文标签烤进去，换了语言也不跟着变。
+    QString (*label)();
 };
 
 /// fio 有时"报表干净但实际有错"（例如 windowsaio 打不开文件却报 err=0），
 /// 所以除了退出码还要主动扫这些关键字。
 /// 后面几条是硬盘可靠性测试的关键：校验失败必须被抓住。
-const ProblemPattern kProblemPatterns[] = {
-    { "failed to open",      kProblemOpenFailed },
-    { "io_u error",          kProblemIoUnitError },
-    { "permission denied",   kProblemPermissionDenied },
-    { "no space left",       kProblemNoSpaceLeft },
-    { "bad option",          kProblemBadOption },
-    { "job global dropped",  kProblemJobGlobalDropped },
-    { "cannot open",         kProblemCannotOpen },
-    { "bad magic header",    kProblemBadMagicHeader },
-    // 校验失败的**两种措辞都要登记**：fio 3.x 长格式是 "crc32c: verify failed at ..."，
-    // 短格式是 "Verify error at file ..., offset ..."。scanForVerifyFailures 两种都认
-    // （那才是坏块计数的来源），这里只登记一种的话，短格式那条路的结果是：
-    // 计数 > 0 但 warnings 是空的 —— 而结论判定又要看 warnings，于是"盘坏了"
-    // 会被同一份汇总判成"合格"。两处口径必须一致。
-    { "verify failed",       kProblemVerifyFailed },
-    { "verify error",        kProblemVerifyFailed },
-    { "illegal byte sequence", kProblemIllegalByteSequence },
-};
+const QVector<ProblemPattern> &problemPatterns()
+{
+    static const QVector<ProblemPattern> patterns = {
+        { "failed to open",      &kProblemOpenFailed },
+        { "io_u error",          &kProblemIoUnitError },
+        { "permission denied",   &kProblemPermissionDenied },
+        { "no space left",       &kProblemNoSpaceLeft },
+        { "bad option",          &kProblemBadOption },
+        { "job global dropped",  &kProblemJobGlobalDropped },
+        { "cannot open",         &kProblemCannotOpen },
+        { "bad magic header",    &kProblemBadMagicHeader },
+        // 校验失败的**两种措辞都要登记**：fio 3.x 长格式是 "crc32c: verify failed at ..."，
+        // 短格式是 "Verify error at file ..., offset ..."。scanForVerifyFailures 两种都认
+        // （那才是坏块计数的来源），这里只登记一种的话，短格式那条路的结果是：
+        // 计数 > 0 但 warnings 是空的 —— 而结论判定又要看 warnings，于是"盘坏了"
+        // 会被同一份汇总判成"合格"。两处口径必须一致。
+        { "verify failed",       &kProblemVerifyFailed },
+        { "verify error",        &kProblemVerifyFailed },
+        { "illegal byte sequence", &kProblemIllegalByteSequence },
+    };
+    return patterns;
+}
 
 } // namespace
 
@@ -235,7 +242,7 @@ QString FioRunner::writeJobFile(const QString &text, const QString &name, QStrin
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     if (dir.isEmpty()) {
         if (error)
-            *error = kErrNoTempDir;
+            *error = kErrNoTempDir();
         return QString();
     }
     QDir().mkpath(dir);
@@ -259,7 +266,7 @@ QString FioRunner::writeJobFile(const QString &text, const QString &name, QStrin
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
         if (error)
-            *error = kErrWriteJobFile.arg(path, file.errorString());
+            *error = kErrWriteJobFile().arg(path, file.errorString());
         return QString();
     }
     const qint64 written = file.write(payload);
@@ -273,7 +280,7 @@ QString FioRunner::writeJobFile(const QString &text, const QString &name, QStrin
     if (written != payload.size() || !flushed) {
         QFile::remove(path);
         if (error)
-            *error = kErrWriteJobFile.arg(path, writeError);
+            *error = kErrWriteJobFile().arg(path, writeError);
         return QString();
     }
     return path;
@@ -355,12 +362,12 @@ bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,
 {
     if (m_running) {
         if (error)
-            *error = kErrPhaseRunning;
+            *error = kErrPhaseRunning();
         return false;
     }
     if (m_fioPath.isEmpty() || !QFileInfo::exists(m_fioPath)) {
         if (error)
-            *error = kErrFioNotSpecified;
+            *error = kErrFioNotSpecified();
         return false;
     }
 
@@ -378,11 +385,11 @@ bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,
     args << jobFilePath;
 
     emit logText(QStringLiteral("> \"%1\" %2").arg(m_fioPath, args.join(QLatin1Char(' '))));
-    emit logText(kFioWorkingDir.arg(workingDir));
+    emit logText(kFioWorkingDir().arg(workingDir));
 
     m_process->start(m_fioPath, args);
     if (!m_process->waitForStarted(15000)) {
-        const QString msg = kErrFioStartFailed.arg(m_process->errorString());
+        const QString msg = kErrFioStartFailed().arg(m_process->errorString());
         m_running = false;
         removeJobFile();
         if (error)
@@ -392,7 +399,7 @@ bool FioRunner::startJob(const QString &workingDir, const QString &jobFilePath,
 
     // 采样 fio 进程自己的 I/O 计数器 —— 图表的数据来源。
     if (!m_ioCounter->attach(m_process->processId()))
-        emit logText(kFioIocounterUnavailable);
+        emit logText(kFioIocounterUnavailable());
 
     // 基线立刻在进程刚起来时取一次（而不是等第一拍），
     // 这样第一个采样区间就是 [0, 0.5s]，曲线能从 0 秒开始。
@@ -439,7 +446,7 @@ void FioRunner::stop()
     if (m_process->state() == QProcess::NotRunning)
         return;
     m_stoppedByUser = true;
-    emit logText(kFioUserStop);
+    emit logText(kFioUserStop());
     m_process->kill();
 }
 
@@ -452,7 +459,7 @@ void FioRunner::noteTestFinished(const QString &reason)
     // 这里故意不再补一采样：从最后一拍结束到 fio 打印汇总之间没有任何测试 I/O，
     // 把它算进去只会让分母变大、分子是 0，凭空把平均值拉低几个百分点。
     m_elapsedSeconds = m_lastSampleStart;
-    emit logText(kFioTestFinished.arg(reason));
+    emit logText(kFioTestFinished().arg(reason));
 }
 
 void FioRunner::onSampleTimer()
@@ -582,10 +589,10 @@ void FioRunner::handleFragment(const QString &fragment)
     // 解析 ETA 只有一个用途：状态打成 f 就说明所有 job 都跑完了。
     QString state;
     if (parseEtaState(fragment, &state) && state == QLatin1String("f"))
-        noteTestFinished(kFioJobEnded);
+        noteTestFinished(kFioJobEnded());
 
     if (fragment.startsWith(QLatin1String("Run status group")))
-        noteTestFinished(kFioSummaryPrinted);
+        noteTestFinished(kFioSummaryPrinted());
 
     emit logText(fragment);
 }
@@ -593,7 +600,7 @@ void FioRunner::handleFragment(const QString &fragment)
 void FioRunner::scanForProblems(const QString &text)
 {
     const QString lower = text.toLower();
-    for (const ProblemPattern &pattern : kProblemPatterns) {
+    for (const ProblemPattern &pattern : problemPatterns()) {
         if (!lower.contains(QLatin1String(pattern.needle)))
             continue;
 
@@ -601,7 +608,7 @@ void FioRunner::scanForProblems(const QString &text)
         auto it = m_warningHits.find(key);
         if (it == m_warningHits.end()) {
             m_warningHits.insert(key, 1);
-            const QString label = pattern.label;
+            const QString label = pattern.label();
             m_warningOrder.append(qMakePair(key, label));
             emit warningRaised(label);
         } else {
@@ -669,7 +676,7 @@ void FioRunner::onProcessErrorOccurred(int error)
     // 启动失败的原因必须报出去。以前它被塞进一个私有成员再没人读，
     // 于是"fio 起不来"只剩 startJob 返回 false 这一条线索，原因丢了。
     if (error == QProcess::FailedToStart)
-        emit logText(kErrFioStartFailed.arg(m_process->errorString()));
+        emit logText(kErrFioStartFailed().arg(m_process->errorString()));
 }
 
 void FioRunner::onProcessFinished(int exitCode, QProcess::ExitStatus status)
@@ -744,7 +751,7 @@ void FioRunner::finalizeResult()
         if (count <= 0)
             continue;
         m_result.warnings << (count > 1
-                                  ? kTextWarningCount.arg(entry.second).arg(count)
+                                  ? kTextWarningCount().arg(entry.second).arg(count)
                                   : entry.second);
     }
 

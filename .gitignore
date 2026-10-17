@@ -11,6 +11,14 @@ build-linux/
 _selftest/
 *.log
 
+# 程序运行时写在 exe 旁边的设置（只有界面语言一个键）。
+# 构建产物在 build/ 里本来就被忽略，这条是防止有人把 exe 拷到仓库根目录跑。
+disktest.ini
+
+# Python 工具（tools/*.py）跑过之后留下的字节码缓存
+__pycache__/
+*.pyc
+
 # 测试结果：程序跑出来的数据，不是源码，别混进提交里
 # 覆盖两种命名：旧版 ml_disktest-data.csv，新版 ml_disktest-性能测试-20261012-193155.csv
 ml_disktest-*.csv

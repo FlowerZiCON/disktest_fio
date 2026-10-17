@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(disktest
-    VERSION 3.0.6
+    VERSION 3.0.7
     DESCRIPTION "Qt + fio disk reliability and performance tester GUI"
     LANGUAGES CXX)
 
@@ -44,7 +44,11 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Charts)
 
 add_executable(disktest WIN32
     src/main.cpp
+    # 界面语言：简体中文 / 繁體中文 / English，见 src/i18n.h
+    src/i18n.h
+    src/i18n.cpp
     src/uitext.h
+    src/uitext.def
     src/fioconfig.h
     src/fioconfig.cpp
     src/prociocounter.h

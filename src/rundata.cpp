@@ -466,7 +466,7 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
     // ---- 文件类型标记 ----
     // 只查这一条就够：没有标记的文件连参数段都不可信。
     if (!magicOk) {
-        return fail(kMsgBadCsvHeader.arg(QDir::toNativeSeparators(path),
+        return fail(kMsgBadCsvHeader().arg(QDir::toNativeSeparators(path),
                                          QString::fromLatin1(RunData::magic())));
     }
 
@@ -482,18 +482,18 @@ static bool parseStream(QTextStream &in, const QString &path, RunData *data, QSt
     parsed.appVersion = parsed.params.value(RunData::appVersionKey()).trimmed();
     const QString minimum = RunData::minimumReadableVersion();
     if (parsed.appVersion.isEmpty()) {
-        return fail(kErrRunDataTooOldNoVersion.arg(
+        return fail(kErrRunDataTooOldNoVersion().arg(
             QDir::toNativeSeparators(path), minimum));
     }
     if (RunData::compareVersions(parsed.appVersion, minimum) < 0) {
-        return fail(kErrRunDataTooOld.arg(QDir::toNativeSeparators(path),
+        return fail(kErrRunDataTooOld().arg(QDir::toNativeSeparators(path),
                                           parsed.appVersion, minimum));
     }
 
     // 到这里格式和版本都对了：一个采样行都没解析出来，说明数据段本身是空的
     // 或者整段坏掉了。这和"第一行不是标记"是两件事，必须分开说。
     if (parsed.readV.isEmpty()) {
-        return fail(kErrRunDataNoSamples.arg(QDir::toNativeSeparators(path))
+        return fail(kErrRunDataNoSamples().arg(QDir::toNativeSeparators(path))
                         .arg(parsed.m_droppedSamples));
     }
 
@@ -604,7 +604,7 @@ bool RunData::parse(const QString &path, RunData *data, QString *error)
         // 不能只返回 false：调用方会拿 *error 去弹对话框，空的 error
         // 会弹出一个内容空白的警告框。
         if (error)
-            *error = kErrLoadDataFailed;
+            *error = kErrLoadDataFailed();
         return false;
     }
 

@@ -1,0 +1,495 @@
+# disktest 的繁體中文介面文字（由 tools/make_zh_tw.py 從 src/uitext.def 生成）
+#
+# 一行一條：`鍵<TAB>譯文`。改成手工維護也可以，只是下次跑生成腳本會被覆蓋。
+# 譯文裡的 `\n` 是換行；%1 %2 這些佔位符一個都不能少。
+# 改完跑一次 `disktest.exe --i18n-check`。
+#
+kAppName	磁碟測試By MOONLIGHT
+kMenuFile	檔案(&F)
+kMenuOpenTestDir	開啟測試目錄(&O)
+kMenuCleanupFiles	清理測試檔案(&C)…
+kMenuSaveData	儲存測試資料(&V)…
+kMenuSaveDataTip	把本次執行的參數和逐點取樣資料存成 CSV
+kMenuLoadData	開啟測試結果(&L)…
+kMenuLoadDataTip	在獨立視窗裡查看之前儲存的測試結果（按資料自身的模式顯示）
+kMenuSaveDiagnostics	儲存診斷輸出(&S)…
+kMenuQuit	結束(&Q)
+kMenuHelp	說明(&H)
+kMenuAbout	關於(&A)
+kMsgLanguageBusy	正在測試中，先點「停止」再切換介面語言。
+kMsgLanguageSwitchTitle	切換介面語言
+kErrLanguageRestartFailed	介面語言已儲存，但重新啟動失敗：\n%1\n\n請手動關掉本程式再開啟一次，新語言就會生效。
+kTextUnknownDevice	(未知裝置)
+kFsNotMounted	未掛載
+kFsReadOnly	只讀掛載
+kFsNoWritableDir	沒有可寫目錄（需要 root）
+kFsNetworkWarning	網路檔案系統：測到的是網路，不是磁碟
+kIgnoredVolumeFmt	%1（%2）
+kVolumeWhyNetwork	網路磁碟機
+kVolumeWhyRamdisk	記憶體磁碟
+kVolumeWhyNoPhysicalDisk	沒有對應的物理磁碟
+kVolumeWhyNoRoot	沒有根目錄或類型未知
+kDiskSystemTag	[系統磁碟]
+kDiskVirtualTag	[虛擬裝置]
+kFsRowLine	%1  %2  %3
+kGroupTargetDrive	選擇磁碟
+kColDeviceTree	磁碟
+kColTargetDir	分割區
+kColUsage	使用量
+kColUsedTotal	已用 / 總空間
+kDriveHintClick	展開磁碟，選中要測的分割區
+kBtnRefresh	重新整理
+kBtnBrowseDir	瀏覽目錄…
+kLabelTargetDriveColon	目標磁碟：
+kDiskSummaryLine	%1  共 %2
+kFsSummaryLine	    %1  可測目錄 %2
+kFsSummaryNoDir	    %1  ✗ %2
+kVolumeLabelFmt	磁碟區標籤: %1
+kVolumeFsFmt	檔案系統: %1
+kVolumeDeviceFmt	裝置: %1
+kVolumeMountFmt	掛載點: %1
+kVolumeSpaceFmt	已用 %1 / 共 %2，可用 %3（%4%）
+kSelfTestTargetMissing	自檢指定的目標目錄 %1 不在任何可測的檔案系統上，已中止
+kTargetGone	原來的目標目錄 %1 已不可用，請重新選擇
+kTargetNotSelected	還沒有選中目標分割區。
+kDiskSpaceUnselected	未選擇分割區
+kTargetFolderFmt	目標：%1
+kTargetFilesystemFmt	\n所屬檔案系統：%1（%2），掛載於 %3
+kTargetFillWholeFmt	\n⚠ 測試會寫滿整個 %1 檔案系統（共 %2），不只是上面這個目錄
+kTargetNetworkWarn	\n⚠ 網路檔案系統：測到的是網路，不是磁碟
+kTargetPlanFmt	\n將寫入：%1 個檔案 × %2（合計 %3）
+kTargetNoSpaceForPlan	\n剩餘空間不足
+kTargetSelfTestFillLimit	\n[自檢] 填充上限 %1 MiB
+kDiskSpaceAvailable	可用 %1 / 共 %2
+kDiskBarUsedPercent	已用 %1%
+kDlgBrowseTargetTitle	選擇測試目錄
+kDlgBrowseTargetHint	選一個目錄，測試檔案會建在它下面的 %1 裡。\n容量與「寫滿」針對的是這個目錄**所在的檔案系統**，不是這個目錄本身。
+kErrBrowseDirNotWritable	這個目錄不可寫：%1
+kErrBrowseDirNotMounted	這個目錄所在的檔案系統讀不到容量資訊：%1
+kModeSeq	順序讀寫
+kModeRand	隨機讀寫
+kConfigDescribeFmt	%1  %2 直接IO  bs=%3  iodepth=%4  校驗=%5
+kVerifyOn	開
+kVerifyOff	關
+kGroupFioEngine	fio 引擎
+kFioPathPlaceholder_Win	fio.exe 的完整路徑
+kFioPathPlaceholder_Posix	fio 的完整路徑
+kBtnBrowse	瀏覽…
+kFioEngineNotFound	引擎: 未找到
+kFioEngineVersion	引擎: %1（%2）
+kFioBundled	自帶
+kFioFromSystem	系統中
+kGroupTestParams	測試參數
+kModeItemSeq	順序讀寫
+kModeItemRand	隨機讀寫
+kLabelRwMode	讀寫模式
+kLabelBlockSize	區塊大小
+kLabelIodepth	佇列深度
+kIoModeDirectFmt	%1 + 直接 I/O（繞過系統快取）
+kIoModeBufferedFmt	%1 + 緩衝 I/O（該引擎不支援直接 I/O）
+kLogBufferedIoWarning	引擎 %1 不支援直接 I/O，本次改為緩衝 I/O —— 讀數會包含系統快取，只能作參考，不能當磁碟真實效能。
+kLabelRounds	測試輪數
+kRoundsSuffix	 輪
+kRoundsTip	整輪測試重複幾遍。\n每一輪都會重新刪除測試檔案、重新按當時的剩餘空間規劃，\n相當於把整輪測試重跑一遍。\n只勾選「讀取」時不刪檔案，只是把校驗重複幾遍。
+kGroupRunLog	執行日誌
+kLogPlaceholder	這裡會按時間順序記錄每一輪、每個階段做了什麼；出錯用紅色顯示。
+kLogRoundsPlanned	計畫測試 %1 輪
+kLogRoundStart	第 %1/%2 輪開始
+kLogRoundStartOne	開始測試
+kLogPhaseWrite	開始寫入
+kLogPhaseRead	開始讀取
+kLogStopRequested	使用者點擊了停止
+kLogCleanedOldFiles	已刪除舊的測試檔案 %1 個
+kLogRoundCleanNext	已刪除上一輪的 %1 個測試檔案，按目前剩餘空間重新規劃
+kLogRoundSummary	第 %1 輪結束：寫入均速 %2，讀取均速 %3
+kLogRoundSummaryBad	第 %1 輪結束：發現異常（%2）
+kLogAllRoundsDone	全部 %1 輪測試結束
+kLogOneRoundDone	測試結束
+kLogErrorPrefix	錯誤：%1
+kLogWarnPrefix	警告：%1
+kIoModeTip_Win	IO 引擎固定為 windowsaio：Windows 上只有它支援 direct=1。\n同步引擎（psync / sync）只能用緩衝 I/O，測到的是系統快取而不是磁碟，故不提供。
+kIoModeTip_Posix	Linux 上 direct=1 走的是 O_DIRECT，libaio / io_uring / psync 都支援。\n預設優先用 libaio：只有非同步引擎才能讓 iodepth 真正生效，\n效能項的 Q8T1 / Q32T1 靠它才測得準。\n如果這份 fio 沒有編 libaio，啟動時會自動退回可用的那個引擎。
+kLabelIoMode	IO 方式
+kParamHint	測試會在目標分割區的 ml_disktest 目錄裡生成 testfile_* 檔案，每個不超過 2 GiB。測試檔案不會自動刪除，可以從「檔案 → 清理測試檔案」刪掉。
+kBlockSizeSeq	4 MiB
+kBlockSizeRand	4 KiB
+kPhaseRead	讀取階段
+kPhaseWrite	寫入階段
+kPhasePerf	效能測試項
+kGroupPhases	測試階段
+kCheckWrite	寫入
+kCheckRead	讀取
+kCheckVerify	校驗
+kBtnStart	開始測試
+kBtnStop	停止
+kReadNoFilesTip	%1 裡還沒有測試檔案。\n勾選「寫入」或先跑一次寫入，才能執行讀取。
+kReadAvailableTip	%1 裡已有測試檔案，可以只執行讀取。
+kReadNeedWriteTip	寫入階段結束後會生成測試檔案，隨後可以讀回校驗。
+kCardReadNow	目前讀取
+kCardWriteNow	目前寫入
+kCardReadAvg	平均讀取
+kCardWriteAvg	平均寫入
+kCardElapsed	已用時
+kCardState	狀態
+kStatePreparing	準備中
+kStateWriting	正在寫入
+kStateReading	正在讀取
+kStateStopped	已停止
+kGroupChart	即時速度
+kLabelPlotStyle	繪圖方式：
+kPlotLine	折線圖
+kPlotScatter	散點圖
+kLabelDensity	密度：
+kDensityHigh	高密度
+kDensityLow	低密度
+kDensityLowTip	低密度：每 2 個像素列畫 1 個點（約 200~2000 點），曲線明顯更簡、也更流暢。\n折線用 LTTB 選點，大的起伏仍然保得住；要看每一個點請切回高密度。\n儲存的 CSV 與報告始終是全量資料，不受這裡影響。
+kDensityHighTip	高密度：每個取樣點都畫（最忠實，點數越多越吃繪製）。\n點數特別多、介面發澀時，切到低密度會順滑很多。
+kSeriesRead	讀取速度
+kSeriesWrite	寫入速度
+kAxisCapacity	容量（GiB）
+kAxisSpeed	速度（MiB/s）
+kModeElevated	提高權限模式
+kModeNormal	普通模式
+kModeElevatedTip_Win	目前以系統管理員身分執行，可以存取需要提高權限的裝置。
+kModeNormalTip_Win	目前是普通權限。\n以系統管理員身分重新啟動本程式即可進入提高權限模式。
+kModeElevatedTip_Posix	目前以 root 身分執行（euid 0）。
+kModeNormalTip_Posix	目前是普通使用者。\n測試普通檔案不需要 root；只有目標目錄本身沒有寫權限時才需要。
+kStatusSelectDriveHint	請先在「選擇磁碟」清單裡選中要測試的分割區
+kStatusCleanedFiles	已清理 %1 個測試檔案
+kStatusRunDataSaved	已儲存 %1 個取樣點與本次參數到 %2
+kStatusSamplesLoaded	已載入 %1 個取樣點
+kStatusSkippedLines	（跳過 %1 行無法解析的資料）
+kStatusDiagnosticsSaved	診斷輸出已儲存到 %1
+kStatusCleaningOldFiles	正在清理舊的測試檔案…
+kStatusWriting	正在寫入…
+kStatusReading	正在讀取…
+kStatusStopping	正在停止…
+kDlgChooseFioTitle	選擇 fio 可執行檔案
+kFilterExecutable_Win	可執行檔案 (*.exe);;所有檔案 (*)
+kFilterExecutable_Posix	所有檔案 (*)
+kDlgCleanupTitle	清理測試檔案
+kMsgConfirmCleanup	將刪除 %1 裡的 %2 個測試檔案，共 %3。\n\n確定繼續嗎？
+kDlgSaveDataTitle	儲存測試資料
+kFilterCsv	CSV 檔案 (*.csv);;所有檔案 (*)
+kDlgLoadDataTitle	開啟測試結果
+kDlgSaveDiagnosticsTitle	儲存 fio 診斷輸出
+kFilterTextLog	文字檔案 (*.log *.txt);;所有檔案 (*)
+kAboutHtml	<h3>%1</h3><table cellspacing='0' cellpadding='3'><tr><td><b>版本</b></td><td>%2　（%10）</td></tr><tr><td><b>作者</b></td><td>%3</td></tr><tr><td><b>聯絡作者</b></td><td>%4</td></tr><tr><td><b>編譯時間</b></td><td>%5</td></tr><tr><td><b>建置環境</b></td><td>Qt %6 · %7</td></tr></table><p>本工具基於fio，會在選中分割區的 <code>%8</code> 目錄裡生成 <code>%9_*</code> 檔案進行測試，並讀取校驗。僅使用檔案模式。<p><b>感謝你使用本工具。</b>本工具尚在測試階段，有不足的地方請回饋。</p><h4>開源軟體聲明</h4><p>本程式使用了以下開源軟體，在此致謝。各軟體的著作權歸其各自所有者，遵循其各自的授權條款：</p><table cellspacing='0' cellpadding='3'><tr><td><b>fio</b></td><td>GPL-2.0</td><td>Jens Axboe 等，<a href='https://github.com/axboe/fio'>github.com/axboe/fio</a></td></tr><tr><td><b>Qt</b></td><td>LGPL-3.0</td><td>The Qt Company，<a href='https://www.qt.io'>qt.io</a></td></tr></table><p>本程式僅呼叫 fio，未對 fio 做任何修改；Qt 為動態連結，隨程式一起散布的 Qt 執行庫可自行替換。</p><p>本專案是開源專案，使用GPL3.0授權條款開源地址：https://github.com/FlowerZiCON/disktest_fio</p><p>完整許可條款隨程式一起散布，見程式目錄的 <code>licenses</code> 子目錄：<code>fio-COPYING.txt</code>（fio）、<code>Qt-LGPLv3.txt</code>（Qt）。</p>
+kDlgAboutTitle	關於
+kBtnCheckUpdate	檢查更新
+kTextNoneInParens	(無)
+kMsgPhaseProblem	%1 發現異常
+kMsgTestStoppedSuffix	\n\n測試已停止。
+kDlgOverwriteTitle	目標分割區裡已有測試檔案
+kMsgOverwriteBody	目標分割區 %1 的測試目錄裡已經有 %2 個測試檔案，合計 %3。\n\n繼續寫入會先刪除這些舊檔案，再重新完整寫一遍。\n\n確定繼續嗎？
+kBtnContinue	繼續
+kBtnCancel	取消
+kBtnClose	關閉
+kLogStoppedWriteCleaned	[停止] 寫入沒有跑完，磁碟上是不完整的資料，已刪除測試檔案
+kLogStoppedWriteCleanFailed	[停止] 寫入沒有跑完，但刪除測試檔案失敗：%1
+kLogOverwriteCancelled	[取消] 目標分割區裡已有測試檔案，使用者選擇不覆蓋
+kErrNeedDrive	請先在「選擇磁碟」清單裡選中要測試的分割區。
+kErrNoTestFolder	無法確定測試目錄。
+kErrNeedOnePhase	「寫入」和「讀取」至少要勾選一個。
+kErrRoundsTooSmall	測試輪數至少為 1。
+kErrIodepthTooSmall	佇列深度至少為 1。
+kErrTargetUnavailable	目標分割區不可用：%1
+kErrReadCapacity	無法讀取 %1 的容量資訊。
+kErrNoDriveSelected	沒有選中分割區
+kErrNoDriveSelectedDetail	請先在「選擇磁碟」清單裡選中一個分割區。
+kErrStopBeforeCleanup	請先點「停止」再清理。
+kErrBusy	正在測試中
+kErrNoTestFiles	沒有測試檔案
+kErrNoTestFilesInFolder	%1 裡沒有 testfile_* 檔案。
+kErrCleanupFailed	清理失敗
+kErrNoDataToSave	沒有可儲存的資料
+kErrNoSamplesYet	還沒有跑過測試，或者沒有採到任何取樣點。
+kErrLoadDataFailed	開啟測試結果失敗
+kErrRunDataTooOld	這份結果的版本過舊，本程式不再支援。\n\n檔案：%1\n檔案版本：%2\n本程式要求：%3 及以上\n\n請用目前版本重新跑一次測試並儲存。
+kErrRunDataTooOldNoVersion	這份結果的版本過舊，本程式不再支援。\n\n檔案：%1\n檔案版本：未記錄（%2 之前的版本存的檔案都不寫版本號）\n\n請用目前版本重新跑一次測試並儲存。
+kMsgBadCsvHeader	%1\n第一行應當是 \"# %2\"，並且含 [samples] 資料段。
+kErrRunDataNoSamples	%1\n檔案裡有 [samples] 資料段，但沒有任何一行能解析成取樣點（跳過了 %2 行）。\n檔案可能已損壞，或者不是本程式儲存的結果。
+kErrBusyLoading	正在測試中，請先點「停止」再載入歷史資料。
+kErrTargetIsRawDevice	目標不能是裸裝置或物理磁碟：\n%1\n\n本工具只在普通檔案上做測試，請選擇一個分割區裡的可寫目錄。
+kMsgAlsoStateFiles	\n另外還會刪除 %1 個 fio 校驗狀態檔案（%2）。
+kErrNoContentToSave	沒有可儲存的內容
+kErrNoOutputYet	還沒有跑過測試，或者 fio 沒有產生輸出。
+kErrDeleteOldFiles	無法刪除舊檔案：%1
+kErrCreateFolder	無法建立測試目錄：%1
+kMsgSelfTestTargetMismatch	自檢指定的是 %1，但目前選中的是 %2。\n已中止，沒有寫入任何資料。
+kErrTargetMismatch	目標分割區不匹配
+kErrBadParams	參數有誤
+kErrFioNotFound	找不到 fio
+kErrSpecifyFioPath_Win	請先指定 fio.exe 的路徑。
+kErrSpecifyFioPath_Posix	請先指定 fio 的路徑。
+kErrNoTestFilesForRead	%1 裡沒有 testfile_* 檔案，無法單獨執行讀取。\n請先勾選「寫入」跑一次。
+kErrReadCapacityFailed	讀取容量失敗
+kErrNoSpace	空間不足
+kErrNoWritableSpace	目標分割區剩餘 %1，沒有可寫的空間。
+kErrCleanupOldFailed	清理舊檔案失敗
+kErrCreateFolderFailed	建立測試目錄失敗
+kErrCreateJobFile	無法建立 job 檔案
+kErrStartWritePhase	啟動寫入階段失敗
+kErrNoTestFilesAtReadStart	讀取階段開始時 %1 裡沒有 testfile_* 檔案。
+kErrStartReadPhase	啟動讀取階段失敗
+kProblemOpenFailed	fio 報告有檔案開啟失敗（failed to open）
+kProblemIoUnitError	fio 報告 I/O 單元錯誤（io_u error）
+kProblemPermissionDenied	fio 報告權限不足（Permission denied）
+kProblemNoSpaceLeft	目標分割區空間不足（No space left on device）
+kProblemBadOption	fio 拒絕了某個選項（Bad option）
+kProblemJobGlobalDropped	fio 丟棄了 job 裡的全域選項（job global dropped）
+kProblemCannotOpen	fio 無法開啟目標（cannot open）
+kProblemBadMagicHeader	★ 資料校驗失敗：區塊的校驗頭不匹配，磁碟上的內容與寫入時不一致
+kProblemVerifyFailed	★ 資料校驗失敗（verify failed）
+kProblemIllegalByteSequence	★ I/O 傳回非法位元組序列，通常是校驗不一致
+kVerifyBannerHead	⚠ 資料校驗失敗：已發現 %1 處不一致
+kVerifyBannerNote	該磁碟存在問題，請儘快備份資料並更換該磁碟。
+kVerifyCountUnreadable	⚠ 資料校驗結果無法讀取：結果檔案裡的壞區塊計數已損壞
+kVerifyCountUnreadableNote	無法判斷當時有沒有發現壞區塊，建議用目前版本重新測試一次。
+kResultVerifyDetailsShort	（結果檔案裡只留下了前 %1 處明細，當時記錄的總數是 %2 處）
+kLogVerifyFailure	校驗失敗第 %1 處：%2
+kLogVerifySummary	★ 本階段共發現 %1 處資料校驗失敗
+kLogVerifyTruncated	（上面只列出前 %1 處，本次共 %2 處）
+kLogVerifyMarkersTruncated	（圖表上最多標 %1 處壞區塊位置，本次還有 %2 處沒在圖上標出來；執行日誌與儲存的結果檔案裡是全的）
+kLogVerifyNone	資料校驗通過：沒有發現不一致的區塊
+kLogPhaseDidNothing	★ %1沒有產生任何 I/O（既沒有取樣，也沒有 fio 匯總）——這一階段很可能什麼都沒測到：請確認測試檔案完整、且大於區塊大小。
+kReportVerifyLine	*** 資料校驗失敗第 %1 處: %2
+kStatusVerifyFailed	★ 已發現 %1 處資料校驗失敗
+kReportVerifyCount	  校驗失敗區塊數      : 
+kReportVerifyFirst	  首處失敗原話      : 
+kReportVerifyWhere	      · 
+kReportVerifyTruncated	      （上面只列出前 %1 處，本次共 %2 處）
+kLogDebugBannerForced	【開發排查】校驗失敗告警條是**強制顯示**的範例，不是本次真實結果
+kDebugBannerTitleSuffix	  [告警條為範例]
+kErrNoTempDir	找不到可寫的臨時目錄。
+kErrWriteJobFile	無法寫入 job 檔案：\n%1\n%2
+kErrPhaseRunning	已經有一個階段在執行。
+kErrFioNotSpecified	找不到 fio 可執行檔案，請在介面上指定路徑。
+kFioWorkingDir	  (工作目錄: %1)
+kErrFioStartFailed	無法啟動 fio：%1
+kFioIocounterUnavailable	提示：無法讀取 fio 處理程序 I/O 計數，即時曲線將不可用。
+kFioUserStop	… 使用者請求停止
+kFioTestFinished	… 測試已結束（%1），停止取樣
+kFioJobEnded	fio 報告 job 已結束
+kFioSummaryPrinted	fio 已輸出匯總
+kReportDataSaved	測試資料已儲存: %1
+kReportLoadData	開啟測試結果: %1
+kReportLoadedConfig	  模式=%1  區塊大小=%2  iodepth=%3  校驗=%4
+kReportLoadedMode	  這份資料是：%1
+kReportTestStart	=========== 測試開始 ===========
+kReportConfig	設定: %1
+kReportTargetFolder	目標目錄: %1
+kReportReadOnlyMode	只讀模式：使用已有的 %1 個測試檔案（合計 %2）
+kReportVolumeSpace	分割區容量 %1，剩餘 %2，安全餘量 %3
+kReportWritePlan	計畫寫入 %1 個檔案 × %2 = %3（檔案由 fio 邊寫邊建，不預分配）
+kReportAxisFixed	橫軸固定為 0 ~ %1（按測試容量，不再隨時間擴展）
+kReportWriteJobHeader	-------------------- 寫入 job --------------------
+kReportReadPhaseFiles	讀取階段：%1 個檔案，合計 %2
+kReportReadJobHeader	-------------------- 讀取 job --------------------
+kReportWarningLine	*** 警告: %1
+kReportTestEnd	=========== 測試結束 ===========
+kReportTestPartition	測試位置: %1
+kReportRwMode	讀寫模式: %1
+kReportFioExitCode	  fio 結束碼: %1
+kReportSampleWindow	  取樣點數: %1  視窗 %2 秒
+kReportReadAvgMinMax	  平均讀取: %1   (min %2 / max %3)
+kReportWriteAvgMinMax	  平均寫入: %1   (min %2 / max %3)
+kReportNoSamples	  注意: 本階段沒有可用取樣點（只跑了一拍，首拍已被丟棄）
+kReportWarning	  警告: %1
+kReportVerdictBad	結論: 發現異常，請查看上面的警告
+kReportVerdictOk	結論: 正常
+kReportVerdictStopped	結論: 已手動停止
+kSelfTestDataSaved	[自檢] 測試資料已儲存: %1
+kSelfTestSaveFailed	[自檢] 儲存測試資料失敗: %1
+kReportError	[錯誤] %1
+kSelfTestLoadFailed	[自檢] 開啟測試結果失敗: %1
+kSelfTestTargetNotFound	找不到目標分割區：自檢指定的是 %1。
+kTextUnspecified	(未指定)
+kSelfTestPrefix	[自檢] 
+kSelfTestEnumerated	  枚舉到: 
+kSelfTestBegin	[自檢] 開始無人值守自檢…
+kSelfTestPlanLine	    剩餘 %1 → %2 個 × %3 = %4  %5
+kSelfTestViolation	*** 違規 ***
+kSelfTestPlanInvalid	    剩餘 %1 → 計畫無效（空間不足）
+kSelfTestStepLine	    %1  %2
+kPhaseNameWrite	寫入
+kPhaseNameRead	讀取
+kTextNone	無
+kTextNotObserved	(沒觀察到)
+kReportTitle	==================== 硬碟可靠性測試工具 自檢報告 ====================\n
+kReportQtVersion	Qt 版本            : 
+kReportQpaPlatform	QPA 平臺外掛        : 
+kReportFioVersion	fio 版本            : 
+kReportTargetPartition	目標目錄            : 
+kReportTestFolder	測試目錄            : 
+kReportTestConfig	測試設定            : 
+kReportRounds	測試輪數            : 
+kReportDataSource	資料來源            : 載入自 
+kReportNotRealtime	（不是本次即時採集）\n
+kReportStartupError	啟動/執行錯誤       : 
+kReportVolumeList	枚舉到的磁碟/分割區  :
+kReportDiskListNote	（磁碟一行，其下縮進的是它的檔案系統）\n
+kReportIgnoredList	已忽略的磁碟機      : 
+kIgnoredListTip	已忽略：%1\n（網路磁碟機、記憶體磁碟、以及沒有對應物理磁碟的對應磁碟機一律不列）
+kReportSuffixCount	 個\n
+kReportPhaseList	階段                : 
+kReportFillLimit	填充上限(自檢)      : 
+kReportFilePlanHead	檔案計畫            : 
+kReportSuffixTimes	 個 × 
+kReportExistingFiles	已有測試檔案        : 
+kReportPhaseExitCode	  fio 結束碼        : 
+kReportCancelledTag	（已取消）
+kReportPhaseSamples	  取樣點數          : 
+kReportWindowPrefix	  視窗 
+kReportSuffixSeconds	 秒\n
+kReportReadMinAvgMax	  讀取 MiB/s        : min=%1 avg=%2 max=%3\n
+kReportWriteMinAvgMax	  寫入 MiB/s        : min=%1 avg=%2 max=%3\n
+kReportSummaryRead	  fio 匯總 讀取     : 
+kReportSummaryWrite	  fio 匯總 寫入     : 
+kReportPhaseWarnings	  告警              : 
+kReportPlotStyle	繪圖方式            : 
+kReportSamplePoints	取樣點數            : 
+kReportLineSeries	  折線序列=
+kReportScatterSeries	  散點序列=
+kReportSkippedFirst	忽略的首拍          : 
+kReportSkippedFirstNote	 個（每個階段的第 1 拍含 fio 啟動開銷，已丟棄）\n
+kReportAxisHead	橫軸                : 固定 0 ~ 
+kReportAxisMid	（按測試容量）；曲線首點 x=
+kReportAxisLastX	 GiB，末點 x=
+kReportAxisTimeFmt	橫軸                : 固定 0 ~ %1 秒（按時間）；曲線首點 x=%2 秒，末點 x=%3 秒\n
+kReportCardCurrentRead	結束時卡片          : 目前讀=
+kReportCardCurrentWrite	  目前寫=
+kReportCardAvgRead	  平均讀=
+kReportCardAvgWrite	  平均寫=
+kReportCardElapsed	  已用時=
+kReportEndChecks	結束時勾選          : 寫入=%1  讀取=%2  校驗=%3\n
+kReportStateEnd	狀態標籤            : 結束時=
+kReportStateObserved	   執行期間出現過=
+kReportGuardRawDevice	裸裝置路徑攔截      : 
+kReportGuardSyncEngine	同步引擎分類        : 
+kReportGuardRawReject	裸裝置路徑被拒      : 
+kReportGuardVerifyVerdict	校驗失敗即不合格    : 
+kReportGuardTestFileName	測試檔名判據      : 
+kReportGuardWindowIcon	視窗圖示            : 
+kReportGuardAutoStep	降取樣（LTTB 保尖峰）: 
+kReportGuardExclusive	選項互斥（繪圖方式/密度）: 
+kReportExclusiveNote	（任何時刻恰好一個被選中）\n
+kReportGuardFilePlan	檔案規劃（每個 ≤2GiB）: 
+kReportFilesPresent	測試檔案已生成      : 
+kReportGuardLoadedData	載入資料            : 
+kReportLoadedDataNote	 個取樣點）\n
+kReportGuardResultWindow	結果視窗            : 
+kReportResultWindowItem	（獨立視窗開啟 OK，目前顯示項 = %1）
+kReportLoadedModeGuard	結果資料模式判別    : 
+kReportGuardDefaults	啟動預設值          : 
+kReportDefaultsDetail	（可靠性 · 不選磁碟 · 順序讀寫 · iodepth=%1 · 1 輪 · 寫入/讀取/校驗全開 · 效能四項全勾 · 資料 %2 MiB）
+kReportGuardFioLookup	fio 查找規則        : 
+kReportFioLookupDetail	（只看程式目錄 → 再走 PATH，不掃磁碟；目前 = %1）
+kReportLoadedItemsFmt	；分出的測試項 = %1 項
+kReportGuardPerfItems	效能四項讀寫值      : 
+kSelfTestResultWindowFailed	[自檢] 結果視窗開啟失敗（同一份 CSV 灌主視窗是成功的，說明問題在視窗這一側）
+kReportGuardProblems	問題檢查            : 
+kReportNoProblems	PASS（無告警、job err 全 0）
+kReportRawOutput	fio 原始輸出        : 
+kReportCsvOutput	逐點取樣 CSV        : 
+kReportChartPng	圖表 PNG            : 
+kReportWindowPng	整窗 PNG            : 
+kReportVerdict	自檢結論            : 
+kReportStoppedTag	（含手動停止）
+kAppDescription	基於 fio 的硬碟可靠性測試工具（只做檔案模式測試）
+kClSelfTest	無人值守自檢：跑一輪完整測試並把報告寫到 --outdir。
+kClOutDir	自檢輸出目錄（預設 ./_selftest）
+kClFioPath_Win	指定 fio.exe 的路徑
+kClTarget_Win	自檢用的目標分割區，例如 G:/
+kClFioPath_Posix	指定 fio 的路徑
+kClTarget_Posix	自檢用的目標掛載點，例如 /（或 /mnt/disk）
+kClFillLimit	自檢時把「寫滿分割區」的目標壓到這麼多 MiB（真寫滿大磁碟太慢）
+kClMode	自檢用的讀寫模式：seq / rand
+kClStopAfter	自檢時在第 N 秒觸發一次「停止」，驗證停止路徑
+kClScatter	自檢時把繪圖方式切到散點圖（預設折線圖）
+kClReadOnly	自檢時只跑讀取階段（驗證「有檔案才能只讀」）
+kClLowDensity	自檢時把折線圖切到低密度（按屏幕像素降取樣）
+kClSaveData	自檢跑完後把測試資料儲存到這個 CSV
+kClLoadData	自檢直接載入這個 CSV 畫圖並出報告，不跑測試
+kClLang	介面語言：zh_CN / zh_TW / en（預設跟隨系統，也可以從「說明 → 語言」裡換）
+kClSelftestRounds	自檢的測試輪數（整輪重複幾遍）
+kClSelftestPerf	自檢跑效能模式（四個測試項，每項 10 秒）
+kClPerfSizeArg	自檢效能模式的資料大小（MiB）
+kClDebugBanner	開發排查：強制顯示校驗失敗告警條（介面會標明是範例）
+kClI18nCheck	檢查介面譯文的覆蓋率與佔位符，查完結束（結束碼 0 = 全部通過）
+kTextUnknown	未知
+kTextSaveFailed	儲存失敗
+kTextWarningCount	%1 × %2
+kTextJoinDot	 · 
+kTextTitleColon	%1：%2
+kTextArrow	 → 
+kTextParenOpen	（
+kPhaseHeadFmt	--- %1 ---
+kRoundTagFmt	第 %1 輪 · 
+kModeNameReliability	可靠性測試
+kModeNamePerformance	效能測試
+kModeReliabilityTip	把選中分割區寫滿，再讀回逐區塊校驗，用來發現壞區塊和靜默資料損壞。
+kModePerformanceTip	先建好測試檔案，再依次跑四個測試項，每項固定 10 秒，測讀/寫吞吐。
+kPerfSeqQ8T1	順序讀寫 Q8T1
+kPerfSeqQ1T1	順序讀寫 Q1T1
+kPerfRandQ32T1	隨機讀寫 Q32T1
+kPerfRandQ1T1	隨機讀寫 Q1T1
+kGroupPerfItems	測試項（每項固定 %1 秒）
+kLabelPerfSize	測試資料大小
+kPerfSizeTip	測試檔案會按這個大小事先建好（固定單檔案，不分片）。
+kPerfDescribeFmt	%1  資料 %2  %3 直接IO  每項 %4 秒
+kPerfColRead	讀取 (MiB/s)
+kPerfColWrite	寫入 (MiB/s)
+kWindowTitleFmt	%1 %2 -%3
+kChartPlaceholder	請先點擊「開始測試」
+kChartTitleTime	時間（秒）
+kChartTitleCapacity	測試容量（GiB）
+kResultWindowTitleFmt	%1 - %2
+kResultModeLabelFmt	測試模式：%1
+kResultSourceFmt	資料來源：%1
+kResultSummaryTarget	目標分割區
+kResultSummaryMode	讀寫模式
+kResultSummaryBlock	區塊大小
+kResultSummaryRounds	測試輪數
+kResultSummarySamples	取樣點數
+kResultSummaryElapsed	已用時
+kResultSummaryAvgRead	平均讀取
+kResultSummaryAvgWrite	平均寫入
+kResultSummarySeqRead	平均順序讀取
+kResultSummarySeqWrite	平均順序寫入
+kResultSummaryData	測試資料
+kResultSummaryPlan	檔案計畫
+kResultPerfHint	四條曲線分別對應四個測試項。點某一行下面的數字格子，圖表裡就只顯示那一項的讀寫曲線；再點一次還原顯示全部。
+kResultReliabilityHint	曲線橫軸是已處理容量，紅色為讀取、藍色為寫入。
+kResultLegacyModeNote	（老檔案未記錄測試模式，按可靠性資料渲染）
+kResultShowOneFmt	只顯示：%1
+kResultPerfItemFmt	%1 讀 %2 / 寫 %3
+kResultPerfNoItemNote	這份效能資料沒有記錄每一項的歸屬（老格式），只能畫一條讀/寫合計曲線。重新跑一次效能測試並儲存，就能按測試項分別回看。
+kLogPerfItemStart	%1 開始（每趟 %2 秒，讀寫各一趟）
+kLogPerfAllDone	全部 %1 項測試結束
+kLogPerfCleanup	效能測試結束，已刪除測試檔案
+kStatusFinishedFinal	測試結束
+kStatusStoppedFinal	已停止（測試檔案已清理）
+kTargetPerfPlanFmt	\n測試資料: 單個檔案 %1
+kStatusPerfPass	正在測試：%1 · %2
+kLogPerfPassStart	%1 · %2 開始（%3 秒）
+kLogDroppedTail	丟棄本階段最後一拍（必然橫跨收尾，速率偏低）：%1
+kMsgFat32TooBigTitle	測試資料太大
+kErrFat32TooBig	目標分割區 %1 是 FAT 檔案系統（FAT32 / vfat），單個檔案最大只能到 4 GiB。\n\n測試資料大小選了 %2，單檔案放不下。\n\n請改成 4 GiB 及以下，或者換一個支援大檔案的檔案系統（NTFS / exFAT / ext4 / xfs 都可以）。
+kLogPreallocating	正在預建測試檔案：%1 個 × %2
+kLogPreallocated	測試檔案已就緒，合計 %1
+kErrPerfNoItem	請至少勾選一個測試項。
+kErrPerfDataSize	測試資料大小必須大於 0。
+kModeGroupTitle	測試模式
+kLogPreparingFiles	準備中：正在預建測試檔案 %1/%2
+kLogPerfPassDone	%1 %2 完成：%3
+kTraceShownTip	右邊圖表顯示的是 %1 的讀寫曲線
+kTraceNoData	這一項還沒有資料。
+kTraceBusyTip	測試進行中，結束後才能查看明細。
+kTraceClickTip	點擊在右邊圖表裡顯示這一項的讀寫曲線
+kErrPerfNoSpace	目標分割區剩餘 %1，放不下 %2 的測試資料。
+kErrPreallocFailed	預建測試檔案失敗
+kMsgNoDirectIoTitle	檔案系統不支援直接 I/O
+kErrNoDirectIo	測試目錄 %1 所在的檔案系統不支援直接 I/O（O_DIRECT）：%2\n\n本工具固定用 direct=1 繞過系統快取，測的才是磁碟本身。\ntmpfs、overlayfs 這類檔案系統（/dev/shm、/run、容器裡的根目錄）\n不支援它，請換一個真實磁碟上的目錄（ext4 / xfs / btrfs 都支援）。
+kLogPerfAllPlanned	共 %1 項，預計 %2 秒
+kErrCreateJobFailed	無法建立 job 檔案

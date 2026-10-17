@@ -1,0 +1,502 @@
+# English UI text for disktest.
+#
+# One line per entry: `key<TAB>translation`. The key is the constant name in
+# src/uitext.def, where the Chinese source text sits right next to it.
+#   * `\n` in a value is a real line break, `\\` is a backslash.
+#   * Keep every %1 %2 ... placeholder (QString::arg() slots): the order inside a
+#     sentence may change, the numbers may not disappear.
+#   * Keys ending in _Win / _Posix are the two platform variants of one sentence
+#     (fio.exe vs fio, elevated vs root, file dialog filters); both rows must stay.
+#   * Check with `disktest.exe --i18n-check`: missing keys, unknown keys and
+#     placeholder mismatches are reported, exit code non-zero on failure.
+#   * A key missing here falls back to the Chinese source.
+#
+kAppName	Disk Test by MOONLIGHT
+kMenuFile	&File
+kMenuOpenTestDir	&Open Test Folder
+kMenuCleanupFiles	&Clean Up Test Files…
+kMenuSaveData	Sa&ve Test Data…
+kMenuSaveDataTip	Save this run's parameters and per-sample data as a CSV.
+kMenuLoadData	&Load Test Results…
+kMenuLoadDataTip	View previously saved test results in a separate window (displayed in the mode stored in the data).
+kMenuSaveDiagnostics	Save &Diagnostic Output…
+kMenuQuit	&Quit
+kMenuHelp	&Help
+kMenuAbout	&About
+kMsgLanguageBusy	A test is running. Click "Stop" before switching the interface language.
+kMsgLanguageSwitchTitle	Switch Interface Language
+kErrLanguageRestartFailed	The interface language was saved, but restarting failed:\n%1\n\nClose the program manually and open it again; the new language will then take effect.
+kTextUnknownDevice	(Unknown device)
+kFsNotMounted	Not mounted
+kFsReadOnly	Mounted read-only
+kFsNoWritableDir	No writable directory (root required)
+kFsNetworkWarning	Network file system: you are measuring the network, not the disk
+kIgnoredVolumeFmt	%1 (%2)
+kVolumeWhyNetwork	Network drive
+kVolumeWhyRamdisk	RAM disk
+kVolumeWhyNoPhysicalDisk	No matching physical disk
+kVolumeWhyNoRoot	No root directory, or unknown type
+kDiskSystemTag	[System disk]
+kDiskVirtualTag	[Virtual device]
+kFsRowLine	%1  %2  %3
+kGroupTargetDrive	Select disk
+kColDeviceTree	Disk
+kColTargetDir	Partition
+kColUsage	Usage
+kColUsedTotal	Used / Total
+kDriveHintClick	Expand a disk and select the partition to test
+kBtnRefresh	Refresh
+kBtnBrowseDir	Browse…
+kLabelTargetDriveColon	Target disk:
+kDiskSummaryLine	%1  total %2
+kFsSummaryLine	    %1  testable directories %2
+kFsSummaryNoDir	    %1  ✗ %2
+kVolumeLabelFmt	Label: %1
+kVolumeFsFmt	File system: %1
+kVolumeDeviceFmt	Device: %1
+kVolumeMountFmt	Mount point: %1
+kVolumeSpaceFmt	Used %1 / total %2, free %3 (%4%)
+kSelfTestTargetMissing	The target directory %1 given for the self-test is not on any testable file system; aborted
+kTargetGone	The original target directory %1 is no longer available; select a new one
+kTargetNotSelected	No target partition selected yet.
+kDiskSpaceUnselected	No partition selected
+kTargetFolderFmt	Target: %1
+kTargetFilesystemFmt	\nFile system: %1 (%2), mounted at %3
+kTargetFillWholeFmt	\n⚠ The test fills the whole %1 file system (total %2), not just the folder above
+kTargetNetworkWarn	\n⚠ Network file system: you are measuring the network, not the disk
+kTargetPlanFmt	\nWill write: %1 files × %2 (total %3)
+kTargetNoSpaceForPlan	\nNot enough free space
+kTargetSelfTestFillLimit	\n[Self-test] fill limit %1 MiB
+kDiskSpaceAvailable	Free %1 / total %2
+kDiskBarUsedPercent	Used %1%
+kDlgBrowseTargetTitle	Select Test Folder
+kDlgBrowseTargetHint	Choose a folder; the test files are created in %1 inside it.\nCapacity and "fill the disk" refer to the **file system this folder resides on**, not to the folder itself.
+kErrBrowseDirNotWritable	This folder is not writable: %1
+kErrBrowseDirNotMounted	Cannot read capacity information for the file system this folder resides on: %1
+kModeSeq	Sequential read/write
+kModeRand	Random read/write
+kConfigDescribeFmt	%1  %2 direct I/O  bs=%3  iodepth=%4  verify=%5
+kVerifyOn	On
+kVerifyOff	Off
+kGroupFioEngine	fio engine
+kFioPathPlaceholder_Win	Full path to fio.exe
+kFioPathPlaceholder_Posix	Full path to fio
+kBtnBrowse	Browse…
+kFioEngineNotFound	Engine: not found
+kFioEngineVersion	Engine: %1 (%2)
+kFioBundled	Bundled
+kFioFromSystem	System
+kGroupTestParams	Test parameters
+kModeItemSeq	Sequential read/write
+kModeItemRand	Random read/write
+kLabelRwMode	Read/write mode
+kLabelBlockSize	Block size
+kLabelIodepth	Queue depth
+kIoModeDirectFmt	%1 + direct I/O (bypasses the system cache)
+kIoModeBufferedFmt	%1 + buffered I/O (this engine does not support direct I/O)
+kLogBufferedIoWarning	Engine %1 does not support direct I/O, so this run uses buffered I/O — the figures include the system cache and are for reference only, not the disk's real performance.
+kLabelRounds	Rounds
+kRoundsSuffix	
+kRoundsTip	How many times the whole test is repeated.\nEach round deletes the test files again and re-plans from the free space at that moment,\nwhich is equivalent to running the whole test again.\nWith only "Read" checked, the files are not deleted; the verification is simply repeated.
+kGroupRunLog	Run log
+kLogPlaceholder	This area records, in time order, what each round and each phase did; errors are shown in red.
+kLogRoundsPlanned	Planned %1 rounds
+kLogRoundStart	Round %1/%2 started
+kLogRoundStartOne	Test started
+kLogPhaseWrite	Write started
+kLogPhaseRead	Read started
+kLogStopRequested	The user clicked Stop
+kLogCleanedOldFiles	Deleted %1 old test files
+kLogRoundCleanNext	Deleted the %1 test files from the previous round; re-planning from the current free space
+kLogRoundSummary	Round %1 finished: average write %2, average read %3
+kLogRoundSummaryBad	Round %1 finished: problems found (%2)
+kLogAllRoundsDone	All %1 rounds finished
+kLogOneRoundDone	Test finished
+kLogErrorPrefix	Error: %1
+kLogWarnPrefix	Warning: %1
+kIoModeTip_Win	The I/O engine is fixed to windowsaio: on Windows it is the only one that supports direct=1.\nSynchronous engines (psync / sync) can only use buffered I/O, which measures the system cache rather than the disk, so they are not offered.
+kIoModeTip_Posix	On Linux, direct=1 goes through O_DIRECT, which libaio / io_uring / psync all support.\nlibaio is preferred by default: only an asynchronous engine makes iodepth really take effect,\nand the Q8T1 / Q32T1 performance items can only be measured accurately with it.\nIf this fio was not built with libaio, it falls back to an available engine at startup.
+kLabelIoMode	I/O mode
+kParamHint	The test creates testfile_* files in the ml_disktest folder of the target partition, each no larger than 2 GiB. Test files are not deleted automatically; you can remove them with "File → Clean Up Test Files".
+kBlockSizeSeq	4 MiB
+kBlockSizeRand	4 KiB
+kPhaseRead	Read phase
+kPhaseWrite	Write phase
+kPhasePerf	Performance test item
+kGroupPhases	Test phases
+kCheckWrite	Write
+kCheckRead	Read
+kCheckVerify	Verify
+kBtnStart	Start Test
+kBtnStop	Stop
+kReadNoFilesTip	There are no test files in %1 yet.\nCheck "Write" or run a write pass first before you can read.
+kReadAvailableTip	%1 already contains test files, so you can run the read on its own.
+kReadNeedWriteTip	Test files are created when the write phase finishes; they can then be read back and verified.
+kCardReadNow	Current read
+kCardWriteNow	Current write
+kCardReadAvg	Average read
+kCardWriteAvg	Average write
+kCardElapsed	Elapsed
+kCardState	State
+kStatePreparing	Preparing
+kStateWriting	Writing
+kStateReading	Reading
+kStateStopped	Stopped
+kGroupChart	Live speed
+kLabelPlotStyle	Plot style:
+kPlotLine	Line chart
+kPlotScatter	Scatter chart
+kLabelDensity	Density:
+kDensityHigh	High density
+kDensityLow	Low density
+kDensityLowTip	Low density: one point per 2 pixel columns (about 200-2000 points), so the curve is noticeably simpler and smoother.\nLine charts use LTTB downsampling and still keep large swings; switch back to high density to see every point.\nSaved CSV files and reports always contain the full data and are not affected by this setting.
+kDensityHighTip	High density: every sample point is drawn (most faithful, but the more points, the heavier the drawing).\nWhen there are very many points and the UI feels sluggish, switching to low density is much smoother.
+kSeriesRead	Read speed
+kSeriesWrite	Write speed
+kAxisCapacity	Capacity (GiB)
+kAxisSpeed	Speed (MiB/s)
+kModeElevated	Elevated mode
+kModeNormal	Normal mode
+kModeElevatedTip_Win	Running as administrator, so devices that require elevation can be accessed.
+kModeNormalTip_Win	Currently running with normal privileges.\nRestart this program as administrator to enter elevated mode.
+kModeElevatedTip_Posix	Running as root (euid 0).
+kModeNormalTip_Posix	Currently running as a normal user.\nTesting regular files does not need root; root is only needed when the target directory itself is not writable.
+kStatusSelectDriveHint	Select the partition to test in the "Select disk" list first
+kStatusCleanedFiles	Cleaned up %1 test files
+kStatusRunDataSaved	Saved %1 sample points and the current parameters to %2
+kStatusSamplesLoaded	Loaded %1 sample points
+kStatusSkippedLines	(skipped %1 lines of unparsable data)
+kStatusDiagnosticsSaved	Diagnostics output saved to %1
+kStatusCleaningOldFiles	Cleaning up old test files…
+kStatusWriting	Writing…
+kStatusReading	Reading…
+kStatusStopping	Stopping…
+kDlgChooseFioTitle	Select fio Executable
+kFilterExecutable_Win	Executable files (*.exe);;All files (*)
+kFilterExecutable_Posix	All files (*)
+kDlgCleanupTitle	Clean Up Test Files
+kMsgConfirmCleanup	%2 test files in %1 will be deleted, %3 in total.\n\nContinue?
+kDlgSaveDataTitle	Save Test Data
+kFilterCsv	CSV files (*.csv);;All files (*)
+kDlgLoadDataTitle	Open Test Results
+kDlgSaveDiagnosticsTitle	Save fio Diagnostics Output
+kFilterTextLog	Text files (*.log *.txt);;All files (*)
+kAboutHtml	<h3>%1</h3><table cellspacing='0' cellpadding='3'><tr><td><b>Version</b></td><td>%2 (%10)</td></tr><tr><td><b>Author</b></td><td>%3</td></tr><tr><td><b>Contact the author</b></td><td>%4</td></tr><tr><td><b>Build time</b></td><td>%5</td></tr><tr><td><b>Build environment</b></td><td>Qt %6 · %7</td></tr></table><p>This tool is based on fio. It creates <code>%9_*</code> files in the <code>%8</code> directory of the selected partition to run the test, then reads them back for verification. File mode only.<p><b>Thank you for using this tool.</b> The tool is still in testing; please send feedback where it falls short.</p><h4>Open source software notice</h4><p>This program uses the following open source software, with thanks. Copyright in each belongs to its respective owner and follows its respective license:</p><table cellspacing='0' cellpadding='3'><tr><td><b>fio</b></td><td>GPL-2.0</td><td>Jens Axboe et al., <a href='https://github.com/axboe/fio'>github.com/axboe/fio</a></td></tr><tr><td><b>Qt</b></td><td>LGPL-3.0</td><td>The Qt Company, <a href='https://www.qt.io'>qt.io</a></td></tr></table><p>This program only calls fio and makes no changes to fio; Qt is dynamically linked, so the Qt runtime libraries distributed with the program can be replaced at will.</p><p>This project is open source under the GPL3.0 license, source at: https://github.com/FlowerZiCON/disktest_fio</p><p>The full license terms are distributed with the program; see the <code>licenses</code> subdirectory of the program folder: <code>fio-COPYING.txt</code> (fio), <code>Qt-LGPLv3.txt</code> (Qt).</p>
+kDlgAboutTitle	About
+kBtnCheckUpdate	Check for Updates
+kTextNoneInParens	(None)
+kMsgPhaseProblem	%1: problem detected
+kMsgTestStoppedSuffix	\n\nTest stopped.
+kDlgOverwriteTitle	Test files already exist in the target partition
+kMsgOverwriteBody	The test folder in target partition %1 already contains %2 test files, %3 in total.\n\nContinuing the write will first delete these old files and then write everything again from scratch.\n\nContinue?
+kBtnContinue	Continue
+kBtnCancel	Cancel
+kBtnClose	Close
+kLogStoppedWriteCleaned	[Stop] The write did not finish, so the data on the disk is incomplete; the test files were deleted
+kLogStoppedWriteCleanFailed	[Stop] The write did not finish, and deleting the test files failed: %1
+kLogOverwriteCancelled	[Cancel] Test files already exist in the target partition; the user chose not to overwrite
+kErrNeedDrive	Select the partition to test in the "Select disk" list first.
+kErrNoTestFolder	Cannot determine the test folder.
+kErrNeedOnePhase	Select at least one of "Write" and "Read".
+kErrRoundsTooSmall	The number of test rounds must be at least 1.
+kErrIodepthTooSmall	Queue depth must be at least 1.
+kErrTargetUnavailable	Target partition unavailable: %1
+kErrReadCapacity	Cannot read capacity information for %1.
+kErrNoDriveSelected	No partition selected
+kErrNoDriveSelectedDetail	Select a partition in the "Select disk" list first.
+kErrStopBeforeCleanup	Click "Stop" before cleaning up.
+kErrBusy	A test is running
+kErrNoTestFiles	No test files
+kErrNoTestFilesInFolder	No testfile_* files in %1.
+kErrCleanupFailed	Cleanup failed
+kErrNoDataToSave	No data to save
+kErrNoSamplesYet	No test has run yet, or no sample points were collected.
+kErrLoadDataFailed	Failed to open test results
+kErrRunDataTooOld	This result's format version is too old and is no longer supported by this program.\n\nFile: %1\nFile version: %2\nRequired: %3 or later\n\nPlease re-run the test with the current version and save it again.
+kErrRunDataTooOldNoVersion	This result's format version is too old and is no longer supported by this program.\n\nFile: %1\nFile version: not recorded (files saved by versions before %2 do not store a version number)\n\nPlease re-run the test with the current version and save it again.
+kMsgBadCsvHeader	%1\nThe first line should be "# %2", and the file must contain a [samples] data section.
+kErrRunDataNoSamples	%1\nThe file has a [samples] data section, but no line could be parsed as a sample point (%2 lines skipped).\nThe file may be corrupted, or may not be a result saved by this program.
+kErrBusyLoading	A test is running. Click "Stop" before loading historical data.
+kErrTargetIsRawDevice	The target cannot be a raw device or physical disk:\n%1\n\nThis tool only tests regular files; choose a writable directory on a partition.
+kMsgAlsoStateFiles	\nIn addition, %1 fio verification state files (%2) will also be deleted.
+kErrNoContentToSave	Nothing to save
+kErrNoOutputYet	No test has run yet, or fio produced no output.
+kErrDeleteOldFiles	Cannot delete old files: %1
+kErrCreateFolder	Cannot create test folder: %1
+kMsgSelfTestTargetMismatch	The self-test specified %1, but the current selection is %2.\nAborted without writing any data.
+kErrTargetMismatch	Target partition mismatch
+kErrBadParams	Invalid parameters
+kErrFioNotFound	fio not found
+kErrSpecifyFioPath_Win	Specify the path to fio.exe first.
+kErrSpecifyFioPath_Posix	Specify the path to fio first.
+kErrNoTestFilesForRead	%1 contains no testfile_* files, so the read cannot run on its own.\nSelect "Write" and run a test first.
+kErrReadCapacityFailed	Failed to read capacity
+kErrNoSpace	Not enough space
+kErrNoWritableSpace	The target partition has %1 free, so there is no space to write to.
+kErrCleanupOldFailed	Failed to clean up old files
+kErrCreateFolderFailed	Failed to create test folder
+kErrCreateJobFile	Cannot create job file
+kErrStartWritePhase	Failed to start the write phase
+kErrNoTestFilesAtReadStart	No testfile_* files in %1 when the read phase started.
+kErrStartReadPhase	Failed to start the read phase
+kProblemOpenFailed	fio reported a file open failure (failed to open)
+kProblemIoUnitError	fio reported an I/O unit error (io_u error)
+kProblemPermissionDenied	fio reported insufficient permission (Permission denied)
+kProblemNoSpaceLeft	The target partition is out of space (No space left on device)
+kProblemBadOption	fio rejected an option (Bad option)
+kProblemJobGlobalDropped	fio dropped a global option in the job (job global dropped)
+kProblemCannotOpen	fio cannot open the target (cannot open)
+kProblemBadMagicHeader	★ Data verification failed: the block checksum header does not match; the content on the disk differs from what was written
+kProblemVerifyFailed	★ Data verification failed (verify failed)
+kProblemIllegalByteSequence	★ I/O returned an illegal byte sequence, usually a verification mismatch
+kVerifyBannerHead	⚠ Data verification failed: %1 mismatches found
+kVerifyBannerNote	This disk has a problem. Back up your data and replace the drive as soon as possible.
+kVerifyCountUnreadable	⚠ Data verification results cannot be read: the bad block count in the result file is corrupted
+kVerifyCountUnreadableNote	It cannot be determined whether bad blocks were found at the time; re-running the test with the current version is recommended.
+kResultVerifyDetailsShort	(the result file only kept details for the first %1, while the total recorded at the time was %2)
+kLogVerifyFailure	Verification failure %1: %2
+kLogVerifySummary	★ %1 data verification failures found in this phase
+kLogVerifyTruncated	(only the first %1 are listed above; %2 in total this run)
+kLogVerifyMarkersTruncated	(the chart marks at most %1 bad block locations; %2 more are not marked on the chart this run; the run log and the saved result file contain them all)
+kLogVerifyNone	Data verification passed: no mismatched blocks found
+kLogPhaseDidNothing	★ %1 produced no I/O at all (no samples and no fio summary) — this phase probably measured nothing: make sure the test files are complete and larger than the block size.
+kReportVerifyLine	*** Data verification failure #%1: %2
+kStatusVerifyFailed	★ %1 data verification failures found
+kReportVerifyCount	  Verify failed blocks : 
+kReportVerifyFirst	  First failure text   : 
+kReportVerifyWhere	      · 
+kReportVerifyTruncated	      (only the first %1 shown above; %2 in total this run)
+kLogDebugBannerForced	[Dev check] The verification-failure banner is a **forced** display example, not a real result of this run
+kDebugBannerTitleSuffix	  [banner is an example]
+kErrNoTempDir	No writable temporary directory found.
+kErrWriteJobFile	Cannot write the job file:\n%1\n%2
+kErrPhaseRunning	A phase is already running.
+kErrFioNotSpecified	Cannot find the fio executable. Please specify its path in the UI.
+kFioWorkingDir	  (working directory: %1)
+kErrFioStartFailed	Cannot start fio: %1
+kFioIocounterUnavailable	Note: cannot read the fio process I/O counters; the live chart will be unavailable.
+kFioUserStop	… stop requested by user
+kFioTestFinished	… test finished (%1), stopping sampling
+kFioJobEnded	fio reported the job has ended
+kFioSummaryPrinted	fio printed a summary
+kReportDataSaved	Test data saved: %1
+kReportLoadData	Opening test result: %1
+kReportLoadedConfig	  mode=%1  block size=%2  iodepth=%3  verify=%4
+kReportLoadedMode	  This data set is: %1
+kReportTestStart	=========== Test start ===========
+kReportConfig	Config: %1
+kReportTargetFolder	Target directory: %1
+kReportReadOnlyMode	Read-only mode: using the existing %1 test files (total %2)
+kReportVolumeSpace	Partition size %1, free %2, safety margin %3
+kReportWritePlan	Planned write: %1 files × %2 = %3 (fio creates the files as it writes, no preallocation)
+kReportAxisFixed	X-axis fixed at 0 ~ %1 (by test size, no longer expands over time)
+kReportWriteJobHeader	-------------------- Write job --------------------
+kReportReadPhaseFiles	Read phase: %1 files, total %2
+kReportReadJobHeader	-------------------- Read job --------------------
+kReportWarningLine	*** Warning: %1
+kReportTestEnd	=========== Test end ===========
+kReportTestPartition	Test location: %1
+kReportRwMode	Read/write mode: %1
+kReportFioExitCode	  fio exit code: %1
+kReportSampleWindow	  Sample points: %1  window %2 s
+kReportReadAvgMinMax	  Average read: %1   (min %2 / max %3)
+kReportWriteAvgMinMax	  Average write: %1   (min %2 / max %3)
+kReportNoSamples	  Note: no usable sample points in this phase (only one tick ran, and the first tick was discarded)
+kReportWarning	  Warning: %1
+kReportVerdictBad	Verdict: abnormalities found, see the warnings above
+kReportVerdictOk	Verdict: normal
+kReportVerdictStopped	Verdict: stopped manually
+kSelfTestDataSaved	[Self-test] Test data saved: %1
+kSelfTestSaveFailed	[Self-test] Failed to save test data: %1
+kReportError	[Error] %1
+kSelfTestLoadFailed	[Self-test] Failed to open test result: %1
+kSelfTestTargetNotFound	Target partition not found: the self-test specified %1.
+kTextUnspecified	(unspecified)
+kSelfTestPrefix	[Self-test] 
+kSelfTestEnumerated	  Enumerated: 
+kSelfTestBegin	[Self-test] Starting unattended self-test…
+kSelfTestPlanLine	    free %1 → %2 files × %3 = %4  %5
+kSelfTestViolation	*** Violation ***
+kSelfTestPlanInvalid	    free %1 → plan invalid (not enough space)
+kSelfTestStepLine	    %1  %2
+kPhaseNameWrite	Write
+kPhaseNameRead	Read
+kTextNone	None
+kTextNotObserved	(not observed)
+kReportTitle	==================== Disk Reliability Test Tool Self-Test Report ====================\n
+kReportQtVersion	Qt version              : 
+kReportQpaPlatform	QPA platform plugin      : 
+kReportFioVersion	fio version             : 
+kReportTargetPartition	Target directory        : 
+kReportTestFolder	Test directory          : 
+kReportTestConfig	Test configuration      : 
+kReportRounds	Test rounds             : 
+kReportDataSource	Data source             : Loaded from 
+kReportNotRealtime	(not captured live in this run)\n
+kReportStartupError	Startup/runtime error   : 
+kReportVolumeList	Disks/partitions        : 
+kReportDiskListNote	(one line per disk, with its file systems indented below)\n
+kReportIgnoredList	Ignored drives          : 
+kIgnoredListTip	Ignored: %1\n(network drives, RAM disks, and mapped drives with no matching physical disk are never listed)
+kReportSuffixCount	 items\n
+kReportPhaseList	Phases                  : 
+kReportFillLimit	Fill limit (self-test)  : 
+kReportFilePlanHead	File plan               : 
+kReportSuffixTimes	 items × 
+kReportExistingFiles	Existing test files     : 
+kReportPhaseExitCode	  fio exit code         : 
+kReportCancelledTag	(cancelled)
+kReportPhaseSamples	  Sample points         : 
+kReportWindowPrefix	  Window 
+kReportSuffixSeconds	 s\n
+kReportReadMinAvgMax	Read MiB/s             : min=%1 avg=%2 max=%3\n
+kReportWriteMinAvgMax	Write MiB/s            : min=%1 avg=%2 max=%3\n
+kReportSummaryRead	  fio summary read      : 
+kReportSummaryWrite	  fio summary write     : 
+kReportPhaseWarnings	  Warnings              : 
+kReportPlotStyle	Plot mode               : 
+kReportSamplePoints	Sample points           : 
+kReportLineSeries	  Line series=
+kReportScatterSeries	  Scatter series=
+kReportSkippedFirst	Discarded first sample  : 
+kReportSkippedFirstNote	 samples (the first sample of each phase carries fio startup overhead and is discarded)\n
+kReportAxisHead	X-axis                  : fixed 0 ~ 
+kReportAxisMid	(by test size); first chart point x=
+kReportAxisLastX	 GiB, last point x=
+kReportAxisTimeFmt	X-axis                  : fixed 0 ~ %1 s (by time); first chart point x=%2 s, last point x=%3 s\n
+kReportCardCurrentRead	End-of-run card         : current read=
+kReportCardCurrentWrite	  current write=
+kReportCardAvgRead	  average read=
+kReportCardAvgWrite	  average write=
+kReportCardElapsed	  elapsed=
+kReportEndChecks	End-of-run checkboxes   : write=%1  read=%2  verify=%3\n
+kReportStateEnd	Status label            : at end=
+kReportStateObserved	   seen during the run=
+kReportGuardRawDevice	Raw device path guard   : 
+kReportGuardSyncEngine	Sync engine class       : 
+kReportGuardRawReject	Raw device path rejected : 
+kReportGuardVerifyVerdict	Fail on verify error    : 
+kReportGuardTestFileName	Test file name rule     : 
+kReportGuardWindowIcon	Window icon             : 
+kReportGuardAutoStep	Decimation (LTTB keeps peaks) : 
+kReportGuardExclusive	Mutually exclusive (plot mode/density) : 
+kReportExclusiveNote	(exactly one selected at any time)\n
+kReportGuardFilePlan	File plan (each ≤2GiB)  : 
+kReportFilesPresent	Test files generated    : 
+kReportGuardLoadedData	Loaded data             : 
+kReportLoadedDataNote	 sample points)\n
+kReportGuardResultWindow	Result window       : 
+kReportResultWindowItem	(Opened in a separate window OK, current item = %1)
+kReportLoadedModeGuard	Result data mode    : 
+kReportGuardDefaults	Startup defaults    : 
+kReportDefaultsDetail	(Reliability · no disk selected · sequential read/write · iodepth=%1 · 1 round · write/read/verify all on · all four performance items checked · data %2 MiB)
+kReportGuardFioLookup	fio lookup rule     : 
+kReportFioLookupDetail	(Program directory only → then PATH, no disk scan; current = %1)
+kReportLoadedItemsFmt	; test items extracted = %1
+kReportGuardPerfItems	Perf item R/W values: 
+kSelfTestResultWindowFailed	[Self-test] Failed to open the result window (loading the same CSV into the main window works, so the problem is on the window side)
+kReportGuardProblems	Problem check       : 
+kReportNoProblems	PASS (no warnings, all job errors are 0)
+kReportRawOutput	fio raw output      : 
+kReportCsvOutput	Per-sample CSV      : 
+kReportChartPng	Chart PNG           : 
+kReportWindowPng	Window PNG          : 
+kReportVerdict	Self-test verdict   : 
+kReportStoppedTag	(includes manual stop)
+kAppDescription	fio-based disk reliability test tool (file-mode tests only)
+kClSelfTest	Unattended self-test: run one full test round and write the report to --outdir.
+kClOutDir	Self-test output directory (default ./_selftest)
+kClFioPath_Win	Path to fio.exe
+kClTarget_Win	Target partition for the self-test, e.g. G:/
+kClFioPath_Posix	Path to fio
+kClTarget_Posix	Target mount point for the self-test, e.g. / (or /mnt/disk)
+kClFillLimit	In the self-test, cap the "fill the partition" target at this many MiB (filling a large disk for real is too slow)
+kClMode	Read/write mode for the self-test: seq / rand
+kClStopAfter	In the self-test, trigger "Stop" once at second N to verify the stop path
+kClScatter	In the self-test, switch the plot style to a scatter chart (line chart by default)
+kClReadOnly	In the self-test, run only the read phase (verifies that read-only works only with existing files)
+kClLowDensity	In the self-test, switch the line chart to low density (decimate by screen pixels)
+kClSaveData	Save the test data to this CSV after the self-test
+kClLoadData	Load this CSV directly for plotting and reporting in the self-test, without running a test
+kClLang	UI language: zh_CN / zh_TW / en (defaults to the system language; can also be changed in Help → Language)
+kClSelftestRounds	Number of test rounds for the self-test (how many times to repeat the full run)
+kClSelftestPerf	Run the self-test in performance mode (four test items, 10 seconds each)
+kClPerfSizeArg	Data size for the self-test performance mode (MiB)
+kClDebugBanner	Developer debugging: force the verification-failure warning bar to show (the UI marks it as a sample)
+kClI18nCheck	Check UI translation coverage and placeholders, then exit (exit code 0 = all passed)
+kTextUnknown	Unknown
+kTextSaveFailed	Save failed
+kTextWarningCount	%1 × %2
+kTextJoinDot	 · 
+kTextTitleColon	%1: %2
+kTextArrow	 → 
+kTextParenOpen	(
+kPhaseHeadFmt	--- %1 ---
+kRoundTagFmt	Round %1 · 
+kModeNameReliability	Reliability test
+kModeNamePerformance	Performance test
+kModeReliabilityTip	Fill the selected partition, then read it back and verify block by block to find bad blocks and silent data corruption.
+kModePerformanceTip	Create the test files first, then run the four test items in order, each for a fixed 10 seconds, to measure read/write throughput.
+kPerfSeqQ8T1	Sequential read/write Q8T1
+kPerfSeqQ1T1	Sequential read/write Q1T1
+kPerfRandQ32T1	Random read/write Q32T1
+kPerfRandQ1T1	Random read/write Q1T1
+kGroupPerfItems	Test items (each fixed at %1 seconds)
+kLabelPerfSize	Test data size
+kPerfSizeTip	The test file is created in advance at this size (always a single file, not split).
+kPerfDescribeFmt	%1  Data %2  %3 direct I/O  %4 s each
+kPerfColRead	Read (MiB/s)
+kPerfColWrite	Write (MiB/s)
+kWindowTitleFmt	%1 %2 - %3
+kChartPlaceholder	Click "Start Test" first
+kChartTitleTime	Time (seconds)
+kChartTitleCapacity	Test capacity (GiB)
+kResultWindowTitleFmt	%1 - %2
+kResultModeLabelFmt	Test mode: %1
+kResultSourceFmt	Data source: %1
+kResultSummaryTarget	Target partition
+kResultSummaryMode	Read/write mode
+kResultSummaryBlock	Block size
+kResultSummaryRounds	Test rounds
+kResultSummarySamples	Sample points
+kResultSummaryElapsed	Elapsed
+kResultSummaryAvgRead	Average read
+kResultSummaryAvgWrite	Average write
+kResultSummarySeqRead	Average sequential read
+kResultSummarySeqWrite	Average sequential write
+kResultSummaryData	Test data
+kResultSummaryPlan	File plan
+kResultPerfHint	The four curves correspond to the four test items. Click a number cell below a row to show only that item's read/write curves in the chart; click again to show all of them.
+kResultReliabilityHint	The horizontal axis is the processed capacity; red is read and blue is write.
+kResultLegacyModeNote	(Old file does not record the test mode; rendered as reliability data)
+kResultShowOneFmt	Showing only: %1
+kResultPerfItemFmt	%1 read %2 / write %3
+kResultPerfNoItemNote	This performance data does not record which item each sample belongs to (old format), so only one combined read/write curve can be drawn. Run the performance test again and save it to review each test item separately.
+kLogPerfItemStart	%1 started (%2 seconds per pass, one pass for read and one for write)
+kLogPerfAllDone	All %1 test items finished
+kLogPerfCleanup	Performance test finished, test files deleted
+kStatusFinishedFinal	Test finished
+kStatusStoppedFinal	Stopped (test files cleaned up)
+kTargetPerfPlanFmt	\nTest data: single file %1
+kStatusPerfPass	Testing: %1 · %2
+kLogPerfPassStart	%1 · %2 started (%3 seconds)
+kLogDroppedTail	Dropped the last tick of this phase (it always spans the tail, so the rate is low): %1
+kMsgFat32TooBigTitle	Test data too large
+kErrFat32TooBig	Target partition %1 is a FAT file system (FAT32 / vfat), where a single file can be at most 4 GiB.\n\nTest data size is set to %2, which does not fit in a single file.\n\nPlease change it to 4 GiB or less, or use a file system that supports large files (NTFS / exFAT / ext4 / xfs all work).
+kLogPreallocating	Pre-creating test files: %1 × %2
+kLogPreallocated	Test files ready, %1 total
+kErrPerfNoItem	Please select at least one test item.
+kErrPerfDataSize	Test data size must be greater than 0.
+kModeGroupTitle	Test mode
+kLogPreparingFiles	Preparing: creating test files %1/%2
+kLogPerfPassDone	%1 %2 finished: %3
+kTraceShownTip	The chart on the right shows the read/write curves of %1
+kTraceNoData	No data for this item yet.
+kTraceBusyTip	Test in progress; details can be viewed when it finishes.
+kTraceClickTip	Click to show this item's read/write curves in the chart on the right
+kErrPerfNoSpace	Target partition has %1 free, not enough for %2 of test data.
+kErrPreallocFailed	Failed to pre-create test files
+kMsgNoDirectIoTitle	File system does not support direct I/O
+kErrNoDirectIo	The file system containing test folder %1 does not support direct I/O (O_DIRECT): %2\n\nThis tool always uses direct=1 to bypass the system cache, so it measures the disk itself.\nFile systems such as tmpfs and overlayfs (/dev/shm, /run, the container root)\ndo not support it; please use a folder on a real disk (ext4 / xfs / btrfs all support it).
+kLogPerfAllPlanned	%1 items in total, estimated %2 seconds
+kErrCreateJobFailed	Cannot create job file

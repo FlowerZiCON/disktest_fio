@@ -1,0 +1,22 @@
+﻿Disk Tester By MOONLIGHT — read this before installing
+
+
+This program fills the target partition completely.
+
+  * It creates testfile_* files in the partition you pick, writes until the
+    disk is full, then reads every block back to verify it. That is how it
+    finds bad blocks and silent data corruption.
+  * For safety, avoid the system disk and any partition that still holds files
+    you need.
+  * The test can be slow: several hours on a 256 GB hard disk, 10+ hours on a
+    1 TB one.
+  * It only touches ordinary files. It never opens a raw physical disk
+    (\\.\PhysicalDriveN), and it neither reads nor writes any configuration
+    file.
+
+
+The program is released under GPL-3.0-or-later; the full license text is in
+licenses\LICENSE inside the install directory. The Qt 6 (LGPL-3.0) and fio
+(GPL-2.0) license texts are in the same folder.
+
+See README.md in the install directory for the full documentation.

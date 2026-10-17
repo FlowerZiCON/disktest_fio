@@ -120,8 +120,8 @@ void VerifyBandChartView::paintEvent(QPaintEvent *event)
 SpeedChart::SpeedChart(QWidget *parent)
     : QWidget(parent)
 {
-    const QString readName = kSeriesRead;
-    const QString writeName = kSeriesWrite;
+    const QString readName = kSeriesRead();
+    const QString writeName = kSeriesWrite();
 
     m_readLine = new QLineSeries(this);
     m_readLine->setName(readName);
@@ -166,13 +166,13 @@ SpeedChart::SpeedChart(QWidget *parent)
 
     // 横轴 = 已处理容量，单位 GB，开测前固定
     m_axisX = new QValueAxis;
-    m_axisX->setTitleText(kAxisCapacity);
+    m_axisX->setTitleText(kAxisCapacity());
     m_axisX->setLabelFormat(QStringLiteral("%.1f"));
     m_axisX->setRange(0, 1);
     m_axisX->setTickCount(6);
 
     m_axisY = new QValueAxis;
-    m_axisY->setTitleText(kAxisSpeed);
+    m_axisY->setTitleText(kAxisSpeed());
     m_axisY->setLabelFormat(QStringLiteral("%.0f"));
     m_axisY->setRange(0, 100);
     m_axisY->setTickCount(6);
@@ -588,7 +588,7 @@ void SpeedChart::setTimeAxis(double seconds)
 {
     m_axisMode = AxisMode::Time;
     m_axisMaxGB = qMax(0.1, seconds);
-    m_axisX->setTitleText(kChartTitleTime);
+    m_axisX->setTitleText(kChartTitleTime());
     m_axisX->setRange(0, m_axisMaxGB);
     m_axisX->setLabelFormat(QStringLiteral("%.0f"));
     m_axisX->setTickCount(6);
@@ -612,7 +612,7 @@ void SpeedChart::setSeriesColors(const QColor &readColor, const QColor &writeCol
 void SpeedChart::setCapacityAxis(double totalGB)
 {
     m_axisMode = AxisMode::Capacity;
-    m_axisX->setTitleText(kChartTitleCapacity);
+    m_axisX->setTitleText(kChartTitleCapacity());
     m_axisMaxGB = qMax(0.01, totalGB);
     m_axisX->setRange(0, m_axisMaxGB);
     // 刻度按量级调：小测试留一位小数，大盘用整数

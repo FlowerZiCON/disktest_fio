@@ -58,6 +58,20 @@
 > 程序**不读也不写任何配置文件**，每次打开都是上面这套默认值。
 > 这是故意的：硬盘测试工具的启动状态必须永远确定，不能"上次测了哪个盘、
 > 这次一进来就选着哪个盘"。
+> （唯一的例外是**界面语言**：选过的语言存在程序目录的 `disktest.ini` 里，
+> 免得每次打开都要重新选一遍；那个目录不可写时会改存到 `%APPDATA%\disktest\`。）
+
+### 界面语言
+
+界面有**简体中文 / 繁體中文 / English**三种。第一次启动跟随系统语言
+（`zh-TW` / `zh-HK` → 繁體中文，其它非中文系统 → English），
+之后可以在 **「帮助 → 语言 / Language」** 里换（会重启一次程序，语言名不翻译，
+这样英文界面下也找得到「简体中文」）。命令行也可以强制指定：
+
+```bat
+disktest.exe --lang en
+disktest.exe --lang zh_TW
+```
 
 ## 怎么读结果
 
@@ -163,10 +177,14 @@ winget install --id JRSoftware.InnoSetup --exact
 ```
 
 安装包的内容就是 `build\dist`（exe + Qt 运行库 + fio + 许可证），所以目标机器同样
-不需要装 Qt 或 VC++ 运行库。静默安装（批量部署用）：
+不需要装 Qt 或 VC++ 运行库。
+
+向导有**简体中文 / 繁體中文 / English** 三种语言，跟随系统语言，也可以强制指定。
+静默安装（批量部署用）：
 
 ```bat
-disktest-3.0.6-setup.exe /VERYSILENT /CURRENTUSER /DIR="D:\Tools\Disktest"
+disktest-3.0.7-setup.exe /VERYSILENT /CURRENTUSER /DIR="D:\Tools\Disktest"
+disktest-3.0.7-setup.exe /VERYSILENT /CURRENTUSER /LANG=chinesetraditional
 ```
 
 **Linux**：

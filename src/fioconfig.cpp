@@ -25,12 +25,12 @@ QVector<FioConfig::PerfItem> FioConfig::allPerfItems()
 QString FioConfig::perfItemName(PerfItem item)
 {
     switch (item) {
-    case PerfItem::SeqQ8T1:   return kPerfSeqQ8T1;
-    case PerfItem::SeqQ1T1:   return kPerfSeqQ1T1;
-    case PerfItem::RandQ32T1: return kPerfRandQ32T1;
-    case PerfItem::RandQ1T1:  return kPerfRandQ1T1;
+    case PerfItem::SeqQ8T1:   return kPerfSeqQ8T1();
+    case PerfItem::SeqQ1T1:   return kPerfSeqQ1T1();
+    case PerfItem::RandQ32T1: return kPerfRandQ32T1();
+    case PerfItem::RandQ1T1:  return kPerfRandQ1T1();
     }
-    return kTextUnknown;
+    return kTextUnknown();
 }
 
 QString FioConfig::perfItemKey(PerfItem item)
@@ -98,7 +98,7 @@ QString FioConfig::perfSizeText(qint64 bytes)
 
 QString FioConfig::testModeText() const
 {
-    return testMode == TestMode::Performance ? kModeNamePerformance : kModeNameReliability;
+    return testMode == TestMode::Performance ? kModeNamePerformance() : kModeNameReliability();
 }
 
 bool FioConfig::isSequential() const
@@ -126,10 +126,10 @@ QString FioConfig::readRw() const
 QString FioConfig::modeText() const
 {
     switch (mode) {
-    case RwMode::SequentialWriteRead: return kModeSeq;
-    case RwMode::RandomWriteRead:     return kModeRand;
+    case RwMode::SequentialWriteRead: return kModeSeq();
+    case RwMode::RandomWriteRead:     return kModeRand();
     }
-    return kTextUnknown;
+    return kTextUnknown();
 }
 
 QString FioConfig::modeKey(RwMode mode)
@@ -419,7 +419,7 @@ bool FioConfig::validate(QString *error) const
     };
 
     if (targetDir.trimmed().isEmpty())
-        return fail(kErrNeedDrive);
+        return fail(kErrNeedDrive());
 
     // 裸设备 / 物理磁盘路径（\\.\PhysicalDrive0、/dev/sda…）一律拒绝。
     //
@@ -428,32 +428,32 @@ bool FioConfig::validate(QString *error) const
     // "目标必须是个目录"，那是巧合而不是设计（一条形如 /dev/disk/by-id/... 的
     // 目录符号链接就可能绕过它）。既然 README 里写了"做了硬拦截"，就得真的拦。
     if (looksLikeRawDevice(targetDir))
-        return fail(kErrTargetIsRawDevice.arg(targetDir));
+        return fail(kErrTargetIsRawDevice().arg(targetDir));
 
     const QString folder = testFolder();
     if (folder.isEmpty())
-        return fail(kErrNoTestFolder);
+        return fail(kErrNoTestFolder());
 
     if (testMode == TestMode::Performance) {
         bool any = false;
         for (bool checked : perfItemChecked)
             any = any || checked;
         if (!any)
-            return fail(kErrPerfNoItem);
+            return fail(kErrPerfNoItem());
         if (perfDataBytes <= 0)
-            return fail(kErrPerfDataSize);
+            return fail(kErrPerfDataSize());
     } else if (!doWrite && !doRead) {
-        return fail(kErrNeedOnePhase);
+        return fail(kErrNeedOnePhase());
     }
 
     if (iodepth < 1)
-        return fail(kErrIodepthTooSmall);
+        return fail(kErrIodepthTooSmall());
     if (rounds < 1)
-        return fail(kErrRoundsTooSmall);
+        return fail(kErrRoundsTooSmall());
 
     const QFileInfo targetInfo(targetDir);
     if (!targetInfo.exists() || !targetInfo.isDir())
-        return fail(kErrTargetUnavailable.arg(targetDir));
+        return fail(kErrTargetUnavailable().arg(targetDir));
 
     return true;
 }
@@ -462,12 +462,12 @@ QString FioConfig::describe() const
 {
     // 引擎与 direct 都是固定的，写在这里让日志和自检报告能看清实际用了什么
     if (testMode == TestMode::Performance) {
-        return QStringLiteral("%1  数据 %2  %3 直接IO  每项 %4 秒")
+        return kPerfDescribeFmt()
             .arg(testModeText(), perfSizeText(perfDataBytes), ioEngine())
             .arg(perfRuntimeSeconds());
     }
-    return kConfigDescribeFmt
+    return kConfigDescribeFmt()
         .arg(modeText(), ioEngine(), blockSize())
         .arg(iodepth)
-        .arg(verify ? kVerifyOn : kVerifyOff);
+        .arg(verify ? kVerifyOn() : kVerifyOff());
 }

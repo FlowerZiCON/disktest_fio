@@ -21,6 +21,7 @@
 #include <QAbstractScrollArea>
 #include <QAbstractSpinBox>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -51,6 +52,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
@@ -165,12 +167,27 @@ const char *kRunMarker = RunData::runMarker();
 /// 不能拿标签整体去比：上报时会被加上 `× N` 的重复次数后缀
 /// （见 FioRunner::finalizeResult），字符串就不是原来的样子了。
 /// 这里认的是标签里那段**不会变**的固定文字。
+///
+/// 不能写死中文：标签本身是跟着界面语言查出来的（English / 繁體中文 / 简体中文），
+/// 写死"校验失败"三个字，界面一换成英文，坏盘就会被判成"只是警告"。
 bool isVerifyRelatedWarning(const QString &warning)
 {
-    return warning.contains(QStringLiteral("verify failed"))
-           || warning.contains(QStringLiteral("校验失败"))
-           || warning.contains(QStringLiteral("非法字节序列"))
-           || warning.contains(QStringLiteral("校验头不匹配"));
+    // fio 自己的输出（英文原文，不随界面语言变）
+    if (warning.contains(QStringLiteral("verify failed"))
+        || warning.contains(QStringLiteral("verify error"))
+        || warning.contains(QStringLiteral("illegal byte sequence")))
+        return true;
+    // 我们自己写的标签：按**当前语言**取，别写死某一种语言的字
+    const QStringList labels = {
+        kProblemVerifyFailed(),
+        kProblemBadMagicHeader(),
+        kProblemIllegalByteSequence(),
+    };
+    for (const QString &label : labels) {
+        if (!label.isEmpty() && warning.contains(label))
+            return true;
+    }
+    return false;
 }
 
 /// 确认框里的补充说明：除了测试文件，fio 的校验状态文件也会被一起删掉。
@@ -179,7 +196,7 @@ QString stateFilesNote(const TestFileSet &set)
 {
     if (set.stateNames.isEmpty())
         return QString();
-    return kMsgAlsoStateFiles.arg(set.stateNames.size())
+    return kMsgAlsoStateFiles().arg(set.stateNames.size())
                              .arg(RunData::formatBytes(set.stateBytes));
 }
 
@@ -360,19 +377,19 @@ void MainWindow::buildUi()
     // 状态栏右侧：先是权限模式，再是 fio 引擎版本
     m_privilegeLabel = new QLabel(this);
     const bool elevated = isProcessElevated();
-    m_privilegeLabel->setText(elevated ? kModeElevated
-                                       : kModeNormal);
+    m_privilegeLabel->setText(elevated ? kModeElevated()
+                                       : kModeNormal());
     m_privilegeLabel->setStyleSheet(
         elevated ? QStringLiteral("color:#1a7f37; font-weight:bold; padding:0 6px;")
                  : QStringLiteral("color:#8a6d00; font-weight:bold; padding:0 6px;"));
     m_privilegeLabel->setToolTip(
-        elevated ? kModeElevatedTip
-                 : kModeNormalTip);
+        elevated ? kModeElevatedTip()
+                 : kModeNormalTip());
     statusBar()->addPermanentWidget(m_privilegeLabel);
 
     m_fioVersionLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_fioVersionLabel);
-    statusBar()->showMessage(kStatusSelectDriveHint);
+    statusBar()->showMessage(kStatusSelectDriveHint());
 }
 
 void MainWindow::buildParamPanel(QWidget *panel)
@@ -382,13 +399,13 @@ void MainWindow::buildParamPanel(QWidget *panel)
     layout->setSpacing(8);
 
     // ---- 测试模式（选在驱动器列表上方）----
-    auto *modeBox = new QGroupBox(kModeGroupTitle, panel);
+    auto *modeBox = new QGroupBox(kModeGroupTitle(), panel);
     auto *modeLayout = new QHBoxLayout(modeBox);
-    m_modeReliabilityRadio = new QRadioButton(kModeNameReliability, modeBox);
-    m_modePerfRadio = new QRadioButton(kModeNamePerformance, modeBox);
+    m_modeReliabilityRadio = new QRadioButton(kModeNameReliability(), modeBox);
+    m_modePerfRadio = new QRadioButton(kModeNamePerformance(), modeBox);
     m_modeReliabilityRadio->setChecked(true);
-    m_modeReliabilityRadio->setToolTip(kModeReliabilityTip);
-    m_modePerfRadio->setToolTip(kModePerformanceTip);
+    m_modeReliabilityRadio->setToolTip(kModeReliabilityTip());
+    m_modePerfRadio->setToolTip(kModePerformanceTip());
     modeLayout->addWidget(m_modeReliabilityRadio);
     modeLayout->addWidget(m_modePerfRadio);
     modeLayout->addStretch(1);
@@ -396,12 +413,12 @@ void MainWindow::buildParamPanel(QWidget *panel)
     connect(m_modePerfRadio, &QRadioButton::toggled, this, &MainWindow::onTestModeChanged);
 
     // ---- fio 可执行文件 ----
-    auto *fioBox = new QGroupBox(kGroupFioEngine, panel);
+    auto *fioBox = new QGroupBox(kGroupFioEngine(), panel);
     auto *fioLayout = new QVBoxLayout(fioBox);
     auto *fioRow = new QHBoxLayout;
     m_fioPathEdit = new QLineEdit(fioBox);
-    m_fioPathEdit->setPlaceholderText(kFioPathPlaceholder);
-    auto *fioBrowse = new QPushButton(kBtnBrowse, fioBox);
+    m_fioPathEdit->setPlaceholderText(kFioPathPlaceholder());
+    auto *fioBrowse = new QPushButton(kBtnBrowse(), fioBox);
     fioRow->addWidget(m_fioPathEdit, 1);
     fioRow->addWidget(fioBrowse);
     fioLayout->addLayout(fioRow);
@@ -414,9 +431,9 @@ void MainWindow::buildParamPanel(QWidget *panel)
         const QString version = FioRunner::queryVersion(path);
         m_fioVersionLabel->setText(
             version.isEmpty()
-                ? kFioEngineNotFound
-                : kFioEngineVersion.arg(version, fioLooksBundled(path) ? kFioBundled
-                                                                       : kFioFromSystem));
+                ? kFioEngineNotFound()
+                : kFioEngineVersion().arg(version, fioLooksBundled(path) ? kFioBundled()
+                                                                       : kFioFromSystem()));
         // 顺手把 IO 引擎定下来：这里已经为了版本号 spawn 过一次 fio 了，
         // 再问一次 --enghelp 成本很低，但能让"用哪个引擎"跟着实际的 fio 走
         // （发行版编的 fio 未必带 libaio）。
@@ -427,36 +444,36 @@ void MainWindow::buildParamPanel(QWidget *panel)
     });
 
     // ---- 驱动器 ----
-    auto *driveBox = new QGroupBox(kGroupTargetDrive, panel);
+    auto *driveBox = new QGroupBox(kGroupTargetDrive(), panel);
     buildDrivePanel(driveBox);
 
     // ---- 负载参数 ----
-    auto *loadBox = new QGroupBox(kGroupTestParams, panel);
+    auto *loadBox = new QGroupBox(kGroupTestParams(), panel);
     auto *loadForm = new QFormLayout(loadBox);
     loadForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     m_modeCombo = new QComboBox(loadBox);
-    m_modeCombo->addItem(kModeItemSeq,
+    m_modeCombo->addItem(kModeItemSeq(),
                          FioConfig::modeKey(FioConfig::RwMode::SequentialWriteRead));
-    m_modeCombo->addItem(kModeItemRand,
+    m_modeCombo->addItem(kModeItemRand(),
                          FioConfig::modeKey(FioConfig::RwMode::RandomWriteRead));
-    loadForm->addRow(kLabelRwMode, m_modeCombo);
+    loadForm->addRow(kLabelRwMode(), m_modeCombo);
 
     m_blockSizeLabel = new QLabel(loadBox);
     m_blockSizeLabel->setStyleSheet(QStringLiteral("color:#666;"));
-    loadForm->addRow(kLabelBlockSize, m_blockSizeLabel);
+    loadForm->addRow(kLabelBlockSize(), m_blockSizeLabel);
 
     m_iodepthSpin = new QSpinBox(loadBox);
     m_iodepthSpin->setRange(1, 1024);
     m_iodepthSpin->setValue(8);   // 默认队列深度 8，与 resetToDefaultSettings 保持一致
-    loadForm->addRow(kLabelIodepth, m_iodepthSpin);
+    loadForm->addRow(kLabelIodepth(), m_iodepthSpin);
 
     m_roundSpin = new QSpinBox(loadBox);
     m_roundSpin->setRange(1, 9999);
-    m_roundSpin->setSuffix(kRoundsSuffix);
+    m_roundSpin->setSuffix(kRoundsSuffix());
     m_roundSpin->setValue(1);
-    m_roundSpin->setToolTip(kRoundsTip);
-    loadForm->addRow(kLabelRounds, m_roundSpin);
+    m_roundSpin->setToolTip(kRoundsTip());
+    loadForm->addRow(kLabelRounds(), m_roundSpin);
 
     // IO 引擎与直接 I/O 都不提供选择：直接 I/O 才能绕过系统缓存、测到磁盘本身，
     // 而能用哪个引擎是平台（和这份 fio 的编译选项）决定的 ——
@@ -464,20 +481,20 @@ void MainWindow::buildParamPanel(QWidget *panel)
     // 都支持 O_DIRECT。这里只做静态说明，具体引擎由
     // applyDetectedIoEngine() 在探测到 fio 之后填进来。
     m_ioModeLabel = new QLabel(
-        kIoModeDirectFmt.arg(FioConfig::ioEngine()), loadBox);
+        kIoModeDirectFmt().arg(FioConfig::ioEngine()), loadBox);
     m_ioModeLabel->setStyleSheet(QStringLiteral("color:#666;"));
-    m_ioModeLabel->setToolTip(kIoModeTip);
-    loadForm->addRow(kLabelIoMode, m_ioModeLabel);
+    m_ioModeLabel->setToolTip(kIoModeTip());
+    loadForm->addRow(kLabelIoMode(), m_ioModeLabel);
 
     // ---- 阶段与校验 ----
-    auto *phaseBox = new QGroupBox(kGroupPhases, panel);
+    auto *phaseBox = new QGroupBox(kGroupPhases(), panel);
     auto *phaseLayout = new QVBoxLayout(phaseBox);
 
-    m_writeCheck = new QCheckBox(kCheckWrite, phaseBox);
+    m_writeCheck = new QCheckBox(kCheckWrite(), phaseBox);
     m_writeCheck->setChecked(true);
-    m_readCheck = new QCheckBox(kCheckRead, phaseBox);
+    m_readCheck = new QCheckBox(kCheckRead(), phaseBox);
     m_readCheck->setChecked(true);
-    m_verifyCheck = new QCheckBox(kCheckVerify, phaseBox);
+    m_verifyCheck = new QCheckBox(kCheckVerify(), phaseBox);
     m_verifyCheck->setChecked(true);
     phaseLayout->addWidget(m_writeCheck);
     phaseLayout->addWidget(m_readCheck);
@@ -492,16 +509,16 @@ void MainWindow::buildParamPanel(QWidget *panel)
 
     // ---- 操作按钮 ----
     auto *buttonRow = new QHBoxLayout;
-    m_startButton = new QPushButton(kBtnStart, panel);
+    m_startButton = new QPushButton(kBtnStart(), panel);
     m_startButton->setMinimumHeight(38);
-    m_stopButton = new QPushButton(kBtnStop, panel);
+    m_stopButton = new QPushButton(kBtnStop(), panel);
     m_stopButton->setMinimumHeight(38);
     buttonRow->addWidget(m_startButton, 2);
     buttonRow->addWidget(m_stopButton, 1);
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
 
-    auto *hint = new QLabel(kParamHint, panel);
+    auto *hint = new QLabel(kParamHint(), panel);
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color:#666;"));
 
@@ -529,7 +546,7 @@ void MainWindow::buildParamPanel(QWidget *panel)
     layout->addWidget(hint);
 
     // ---- 运行日志：占满左侧下方的空白区域 ----
-    auto *logBox = new QGroupBox(kGroupRunLog, panel);
+    auto *logBox = new QGroupBox(kGroupRunLog(), panel);
     auto *logLayout = new QVBoxLayout(logBox);
     logLayout->setContentsMargins(6, 6, 6, 6);
     m_logView = new QPlainTextEdit(logBox);
@@ -538,7 +555,7 @@ void MainWindow::buildParamPanel(QWidget *panel)
     m_logView->setMaximumBlockCount(2000);   // 长时间跑也不会无限涨
     m_logView->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_logView->setMinimumHeight(190);
-    m_logView->setPlaceholderText(kLogPlaceholder);
+    m_logView->setPlaceholderText(kLogPlaceholder());
     QFont logFont = m_logView->font();
     // 等宽字体：Windows 上是 Consolas，Linux 上一般只有 DejaVu / Liberation，
     // 一个都对不上时会落到 Qt 的默认字体（可能是比例字体，日志就列不齐了）。
@@ -567,7 +584,7 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     m_driveTree = new QTreeWidget(driveBox);
     m_driveTree->setColumnCount(4);
     m_driveTree->setHeaderLabels(
-        {kColDeviceTree, kColTargetDir, kColUsedTotal, kColUsage});
+        {kColDeviceTree(), kColTargetDir(), kColUsedTotal(), kColUsage()});
     m_driveTree->setRootIsDecorated(true);
     m_driveTree->setItemsExpandable(true);
     m_driveTree->setExpandsOnDoubleClick(false);
@@ -602,13 +619,13 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     m_targetLabel->setStyleSheet(QStringLiteral("color:#333;"));
 
     auto *hintRow = new QHBoxLayout;
-    auto *hint = new QLabel(kDriveHintClick, driveBox);
+    auto *hint = new QLabel(kDriveHintClick(), driveBox);
     hint->setStyleSheet(QStringLiteral("color:#666;"));
     hint->setWordWrap(true);
-    auto *browse = new QPushButton(kBtnBrowseDir, driveBox);
-    browse->setToolTip(kDlgBrowseTargetHint.arg(FioConfig::folderName()));
+    auto *browse = new QPushButton(kBtnBrowseDir(), driveBox);
+    browse->setToolTip(kDlgBrowseTargetHint().arg(FioConfig::folderName()));
     connect(browse, &QPushButton::clicked, this, &MainWindow::onBrowseTargetDir);
-    auto *refresh = new QPushButton(kBtnRefresh, driveBox);
+    auto *refresh = new QPushButton(kBtnRefresh(), driveBox);
     refresh->setMaximumWidth(70);
     connect(refresh, &QPushButton::clicked, this, [this]() {
         if (refreshDriveList())
@@ -633,17 +650,17 @@ QWidget *MainWindow::buildChartPanel()
 
     auto *cards = new QHBoxLayout;
     cards->setSpacing(4);
-    cards->addWidget(createCard(kCardReadNow, &m_readValueLabel,
+    cards->addWidget(createCard(kCardReadNow(), &m_readValueLabel,
                                 QColor(220, 30, 30), panel));
-    cards->addWidget(createCard(kCardWriteNow, &m_writeValueLabel,
+    cards->addWidget(createCard(kCardWriteNow(), &m_writeValueLabel,
                                 QColor(30, 70, 220), panel));
-    cards->addWidget(createCard(kCardReadAvg, &m_avgReadLabel,
+    cards->addWidget(createCard(kCardReadAvg(), &m_avgReadLabel,
                                 QColor(220, 30, 30), panel));
-    cards->addWidget(createCard(kCardWriteAvg, &m_avgWriteLabel,
+    cards->addWidget(createCard(kCardWriteAvg(), &m_avgWriteLabel,
                                 QColor(30, 70, 220), panel));
-    cards->addWidget(createCard(kCardElapsed, &m_elapsedLabel,
+    cards->addWidget(createCard(kCardElapsed(), &m_elapsedLabel,
                                 QColor(60, 60, 60), panel));
-    cards->addWidget(createCard(kCardState, &m_stateLabel,
+    cards->addWidget(createCard(kCardState(), &m_stateLabel,
                                 QColor(60, 60, 60), panel));
     cards->addStretch(1);
 
@@ -668,7 +685,7 @@ QWidget *MainWindow::buildChartPanel()
 
     // 只留一句结论。不摆 fio 原话（偏移量在日志里有逐处明细）：
     // 告警条要的是"这块盘坏了，赶紧备份换盘"，不是让人在这里读日志。
-    auto *bannerNote = new QLabel(kVerifyBannerNote, m_verifyBanner);
+    auto *bannerNote = new QLabel(kVerifyBannerNote(), m_verifyBanner);
     bannerNote->setWordWrap(true);
     QFont noteFont = bannerNote->font();
     noteFont.setPointSizeF(qMax(10.0, noteFont.pointSizeF() + 2.0));
@@ -682,7 +699,7 @@ QWidget *MainWindow::buildChartPanel()
     // 磁盘占用进度条：条形图 + 右侧两列右对齐的读数（空间 / 百分比）
     auto *diskRow = new QHBoxLayout;
     diskRow->setSpacing(8);
-    auto *diskTitle = new QLabel(kLabelTargetDriveColon, panel);
+    auto *diskTitle = new QLabel(kLabelTargetDriveColon(), panel);
     m_diskBar = new QProgressBar(panel);
     m_diskBar->setRange(0, 1000);
     m_diskBar->setValue(0);
@@ -707,18 +724,18 @@ QWidget *MainWindow::buildChartPanel()
     diskRow->addWidget(m_diskSpaceLabel);
     diskRow->addWidget(m_diskBarLabel);
 
-    auto *chartBox = new QGroupBox(kGroupChart, panel);
+    auto *chartBox = new QGroupBox(kGroupChart(), panel);
     auto *chartLayout = new QVBoxLayout(chartBox);
     chartLayout->setContentsMargins(6, 6, 6, 6);
 
     auto *styleRow = new QHBoxLayout;
-    auto *styleLabel = new QLabel(kLabelPlotStyle, chartBox);
+    auto *styleLabel = new QLabel(kLabelPlotStyle(), chartBox);
 
     // 折线图 / 散点图：**必须互斥**。用显式 QButtonGroup，
     // 不能只依赖"同一个父窗口"这条隐式规则（插入方式一变就可能出现同时选中或都不选）。
     // 互斥组还有个好处：已选中的那个再点也不会被取消，保证永远有一个被选中。
-    m_lineRadio = new QRadioButton(kPlotLine, chartBox);
-    m_scatterRadio = new QRadioButton(kPlotScatter, chartBox);
+    m_lineRadio = new QRadioButton(kPlotLine(), chartBox);
+    m_scatterRadio = new QRadioButton(kPlotScatter(), chartBox);
     m_plotStyleGroup = new QButtonGroup(this);
     m_plotStyleGroup->setExclusive(true);
     m_plotStyleGroup->addButton(m_lineRadio);
@@ -733,16 +750,16 @@ QWidget *MainWindow::buildChartPanel()
     auto *densityRow = new QHBoxLayout(m_densityBox);
     densityRow->setContentsMargins(18, 0, 0, 0);
     densityRow->setSpacing(6);
-    auto *densityLabel = new QLabel(kLabelDensity, m_densityBox);
-    m_densityHighRadio = new QRadioButton(kDensityHigh, m_densityBox);
-    m_densityLowRadio = new QRadioButton(kDensityLow, m_densityBox);
+    auto *densityLabel = new QLabel(kLabelDensity(), m_densityBox);
+    m_densityHighRadio = new QRadioButton(kDensityHigh(), m_densityBox);
+    m_densityLowRadio = new QRadioButton(kDensityLow(), m_densityBox);
     m_densityGroup = new QButtonGroup(this);
     m_densityGroup->setExclusive(true);
     m_densityGroup->addButton(m_densityHighRadio);
     m_densityGroup->addButton(m_densityLowRadio);
     m_densityHighRadio->setChecked(true);
-    m_densityHighRadio->setToolTip(kDensityHighTip);
-    m_densityLowRadio->setToolTip(kDensityLowTip);
+    m_densityHighRadio->setToolTip(kDensityHighTip());
+    m_densityLowRadio->setToolTip(kDensityLowTip());
     connect(m_densityHighRadio, &QRadioButton::toggled, this, &MainWindow::onDensityChanged);
     connect(m_densityLowRadio, &QRadioButton::toggled, this, &MainWindow::onDensityChanged);
     densityRow->addWidget(densityLabel);
@@ -760,7 +777,7 @@ QWidget *MainWindow::buildChartPanel()
     // 刚打开程序时先不画图表，显一行"请先开始测试"；
     // 第一次点开始测试再切到真正的图表页。
     m_chartStack = new QStackedWidget(chartBox);
-    auto *placeholder = new QLabel(kChartPlaceholder, m_chartStack);
+    auto *placeholder = new QLabel(kChartPlaceholder(), m_chartStack);
     placeholder->setAlignment(Qt::AlignCenter);
     QFont placeholderFont = placeholder->font();
     placeholderFont.setPointSizeF(qMax(12.0, placeholderFont.pointSizeF() + 6.0));
@@ -782,29 +799,91 @@ QWidget *MainWindow::buildChartPanel()
 
 void MainWindow::buildMenu()
 {
-    QMenu *fileMenu = menuBar()->addMenu(kMenuFile);
-    QAction *openDir = fileMenu->addAction(kMenuOpenTestDir);
+    QMenu *fileMenu = menuBar()->addMenu(kMenuFile());
+    QAction *openDir = fileMenu->addAction(kMenuOpenTestDir());
     connect(openDir, &QAction::triggered, this, &MainWindow::onOpenTestDirectory);
-    QAction *cleanup = fileMenu->addAction(kMenuCleanupFiles);
+    QAction *cleanup = fileMenu->addAction(kMenuCleanupFiles());
     connect(cleanup, &QAction::triggered, this, &MainWindow::onCleanupTestFiles);
     fileMenu->addSeparator();
-    QAction *saveData = fileMenu->addAction(kMenuSaveData);
-    saveData->setToolTip(kMenuSaveDataTip);
+    QAction *saveData = fileMenu->addAction(kMenuSaveData());
+    saveData->setToolTip(kMenuSaveDataTip());
     connect(saveData, &QAction::triggered, this, &MainWindow::onSaveRunData);
-    QAction *loadData = fileMenu->addAction(kMenuLoadData);
-    loadData->setToolTip(kMenuLoadDataTip);
+    QAction *loadData = fileMenu->addAction(kMenuLoadData());
+    loadData->setToolTip(kMenuLoadDataTip());
     connect(loadData, &QAction::triggered, this, &MainWindow::onLoadRunData);
     fileMenu->addSeparator();
-    QAction *saveLog = fileMenu->addAction(kMenuSaveDiagnostics);
+    QAction *saveLog = fileMenu->addAction(kMenuSaveDiagnostics());
     connect(saveLog, &QAction::triggered, this, &MainWindow::onSaveDiagnostics);
     fileMenu->addSeparator();
-    QAction *quit = fileMenu->addAction(kMenuQuit);
+    QAction *quit = fileMenu->addAction(kMenuQuit());
     quit->setShortcut(QKeySequence::Quit);
     connect(quit, &QAction::triggered, this, &QWidget::close);
 
-    QMenu *helpMenu = menuBar()->addMenu(kMenuHelp);
-    QAction *about = helpMenu->addAction(kMenuAbout);
+    QMenu *helpMenu = menuBar()->addMenu(kMenuHelp());
+    QAction *about = helpMenu->addAction(kMenuAbout());
     connect(about, &QAction::triggered, this, &MainWindow::onAbout);
+
+    // ---- 语言 ----
+    // 菜单标题和三个语言名都不翻译（见 uitext.def 里那几个 UI_TEXT_RAW）：
+    // 界面变成英文之后，还得能找到"简体中文"和"繁體中文"才换得回来。
+    helpMenu->addSeparator();
+    QMenu *languageMenu = helpMenu->addMenu(kMenuLanguage());
+    m_languageGroup = new QActionGroup(this);
+    m_languageGroup->setExclusive(true);
+    const struct { i18n::Language language; QString (*name)(); } languages[] = {
+        { i18n::Language::SimplifiedChinese,  &kLangSimplified },
+        { i18n::Language::TraditionalChinese, &kLangTraditional },
+        { i18n::Language::English,            &kLangEnglish },
+    };
+    for (const auto &entry : languages) {
+        QAction *action = languageMenu->addAction(entry.name());
+        action->setCheckable(true);
+        action->setChecked(entry.language == i18n::current());
+        action->setData(int(entry.language));
+        m_languageGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, action]() {
+            switchLanguage(i18n::Language(action->data().toInt()));
+        });
+    }
+}
+
+void MainWindow::switchLanguage(i18n::Language language)
+{
+    // 菜单里的勾选跟着"真正的当前语言"走：切换失败时不能留一个假的勾。
+    const auto checkCurrentLanguage = [this]() {
+        if (!m_languageGroup)
+            return;
+        for (QAction *action : m_languageGroup->actions()) {
+            if (action->data().toInt() == int(i18n::current()))
+                action->setChecked(true);
+        }
+    };
+
+    if (language == i18n::current())
+        return;
+
+    // 测试跑着的时候不让换：换语言要重启程序，跑到一半会被打断，
+    // 而 fio 子进程和测试目录里的文件都还挂在这次运行上。
+    if (m_phase != Phase::Idle || m_runner->isBusy()) {
+        QMessageBox::information(this, kMsgLanguageSwitchTitle(), kMsgLanguageBusy());
+        checkCurrentLanguage();
+        return;
+    }
+
+    // 先存再重启：新进程起来时按设置读到的就是新语言。
+    i18n::saveChoice(language);
+
+    QStringList arguments;
+    arguments << QStringLiteral("--lang") << i18n::tag(language);
+    const QString exePath = QCoreApplication::applicationFilePath();
+    if (!QProcess::startDetached(exePath, arguments)) {
+        QMessageBox::warning(this, kMsgLanguageSwitchTitle(),
+                             kErrLanguageRestartFailed().arg(exePath));
+        checkCurrentLanguage();
+        return;
+    }
+    // 新进程已经起来了，这一份直接退：别再去碰测试目录，也别走到 closeEvent 的确认框。
+    QCoreApplication::quit();
 }
 
 // ---------------------------------------------------------------- 配置读写
@@ -857,6 +936,10 @@ void MainWindow::applyConfigToUi(const FioConfig &cfg)
 void MainWindow::resetToDefaultSettings()
 {
     // 每次启动都回到同一套**出厂默认值**，不读也不写任何配置文件。
+    //
+    // 唯一的例外是界面语言（i18n::savedChoice）：它存在 QSettings 的 ini 里，
+    // 因为语言是"给人看的偏好"而不是测试参数，不存的话每次打开都要重选一遍。
+    // 下面这些测试参数**一个都不落盘**，这里也不去碰语言那个键。
     //
     // 以前这里会 loadSettings()/saveSettings()，把上次用的模式、盘符、参数
     // 都存到注册表/ini 里下次还原。问题是"启动状态"会随上一次的操作漂移：
@@ -963,8 +1046,8 @@ void MainWindow::applyDetectedIoEngine(const QString &fioPath)
     const bool buffered = !FioConfig::directIo();
     if (m_ioModeLabel) {
         m_ioModeLabel->setText(buffered
-                                   ? kIoModeBufferedFmt.arg(FioConfig::ioEngine())
-                                   : kIoModeDirectFmt.arg(FioConfig::ioEngine()));
+                                   ? kIoModeBufferedFmt().arg(FioConfig::ioEngine())
+                                   : kIoModeDirectFmt().arg(FioConfig::ioEngine()));
         m_ioModeLabel->setStyleSheet(buffered
                                          ? QStringLiteral("color:#b5750f; font-weight:bold;")
                                          : QStringLiteral("color:#666;"));
@@ -973,7 +1056,7 @@ void MainWindow::applyDetectedIoEngine(const QString &fioPath)
     // 防抖计时器调一次，无条件写会把日志刷满。
     if (buffered && !m_bufferedIoWarned) {
         m_bufferedIoWarned = true;
-        logEvent(kLogBufferedIoWarning.arg(FioConfig::ioEngine()), true);
+        logEvent(kLogBufferedIoWarning().arg(FioConfig::ioEngine()), true);
     } else if (!buffered) {
         m_bufferedIoWarned = false;
     }
@@ -1062,20 +1145,20 @@ void MainWindow::setTargetDir(const QString &dir)
 void MainWindow::onBrowseTargetDir()
 {
     const QString start = m_targetDir.isEmpty() ? QDir::homePath() : m_targetDir;
-    const QString dir = QFileDialog::getExistingDirectory(this, kDlgBrowseTargetTitle, start);
+    const QString dir = QFileDialog::getExistingDirectory(this, kDlgBrowseTargetTitle(), start);
     if (dir.isEmpty())
         return;
 
     // 先确认这个目录真的能建东西：不能建就当场说清楚，
     // 别等 fio 跑起来才以一个看不懂的权限错误收场。
     if (!canUseAsTestDir(dir)) {
-        reportProblem(kDlgBrowseTargetTitle, kErrBrowseDirNotWritable.arg(dir));
+        reportProblem(kDlgBrowseTargetTitle(), kErrBrowseDirNotWritable().arg(dir));
         return;
     }
     quint64 total = 0;
     quint64 free = 0;
     if (!queryVolumeSpace(dir, &total, &free)) {
-        reportProblem(kDlgBrowseTargetTitle, kErrBrowseDirNotMounted.arg(dir));
+        reportProblem(kDlgBrowseTargetTitle(), kErrBrowseDirNotMounted().arg(dir));
         return;
     }
     setTargetDir(dir);
@@ -1096,11 +1179,11 @@ bool MainWindow::refreshDriveList(bool startup)
     // "找不到目标"的时候全靠它排查。
     m_diskSummary.clear();
     for (const DiskEntry &disk : disks) {
-        m_diskSummary << kDiskSummaryLine.arg(disk.displayLine(), formatBytes(disk.bytesTotal));
+        m_diskSummary << kDiskSummaryLine().arg(disk.displayLine(), formatBytes(disk.bytesTotal));
         for (const FileSystemEntry &fs : disk.fileSystems) {
             m_diskSummary << (fs.testable()
-                                  ? kFsSummaryLine.arg(fs.displayLine(), fs.suggestedDir)
-                                  : kFsSummaryNoDir.arg(fs.displayLine(), fs.unavailableReason));
+                                  ? kFsSummaryLine().arg(fs.displayLine(), fs.suggestedDir)
+                                  : kFsSummaryNoDir().arg(fs.displayLine(), fs.unavailableReason));
         }
     }
 
@@ -1123,9 +1206,9 @@ bool MainWindow::refreshDriveList(bool startup)
         // 而"[系统盘]"恰恰是防止顺手把系统盘写掉的那一眼。
         QStringList diskTags;
         if (disk.isSystemDisk)
-            diskTags << kDiskSystemTag;
+            diskTags << kDiskSystemTag();
         if (disk.isVirtual)
-            diskTags << kDiskVirtualTag;
+            diskTags << kDiskVirtualTag();
         diskItem->setText(1, diskTags.join(QLatin1Char(' ')));
         diskItem->setText(2, formatBytes(disk.bytesTotal));
         diskItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
@@ -1136,13 +1219,13 @@ bool MainWindow::refreshDriveList(bool startup)
         // 设备名挪到悬停提示里 —— 要和磁盘管理 / lsblk 对照时看这里
         QStringList diskTips;
         if (!disk.kernelName.isEmpty())
-            diskTips << kVolumeDeviceFmt.arg(disk.kernelName);
+            diskTips << kVolumeDeviceFmt().arg(disk.kernelName);
         if (!disk.model.isEmpty())
             diskTips << disk.model;
         if (disk.isSystemDisk)
-            diskTips << kDiskSystemTag;
+            diskTips << kDiskSystemTag();
         if (disk.isVirtual)
-            diskTips << kDiskVirtualTag;
+            diskTips << kDiskVirtualTag();
         diskItem->setToolTip(0, diskTips.join(QLatin1Char('\n')));
         // 磁盘这一层**不可选**：能测的永远是它下面的某个文件系统
         diskItem->setFlags(diskItem->flags() & ~Qt::ItemIsSelectable);
@@ -1165,20 +1248,20 @@ bool MainWindow::refreshDriveList(bool startup)
 
             QStringList tips;
             if (!fs.label.isEmpty())
-                tips << kVolumeLabelFmt.arg(fs.label);
+                tips << kVolumeLabelFmt().arg(fs.label);
             if (!fs.fileSystem.isEmpty())
-                tips << kVolumeFsFmt.arg(fs.fileSystem);
+                tips << kVolumeFsFmt().arg(fs.fileSystem);
             if (!fs.device.isEmpty())
-                tips << kVolumeDeviceFmt.arg(fs.device);
+                tips << kVolumeDeviceFmt().arg(fs.device);
             if (!fs.mountPoint.isEmpty())
-                tips << kVolumeMountFmt.arg(fs.mountPoint);
+                tips << kVolumeMountFmt().arg(fs.mountPoint);
             // 列里为了放得下只写了使用率，精确数字放这儿
-            tips << kVolumeSpaceFmt.arg(formatBytes(fs.bytesUsed()),
+            tips << kVolumeSpaceFmt().arg(formatBytes(fs.bytesUsed()),
                                         formatBytes(fs.bytesTotal),
                                         formatBytes(fs.bytesFree))
                         .arg(fs.usedPercent(), 0, 'f', 1);
             if (fs.isNetwork)
-                tips << kFsNetworkWarning;
+                tips << kFsNetworkWarning();
             if (!fs.testable())
                 tips << fs.unavailableReason;
             fsItem->setToolTip(0, tips.join(QLatin1Char('\n')));
@@ -1215,7 +1298,7 @@ bool MainWindow::refreshDriveList(bool startup)
         m_driveTree->setToolTip(QString());
     else
         m_driveTree->setToolTip(
-            kIgnoredListTip.arg(m_ignoredVolumes.join(QStringLiteral("  "))));
+            kIgnoredListTip().arg(m_ignoredVolumes.join(QStringLiteral("  "))));
 
     if (matching != nullptr) {
         m_driveTree->setCurrentItem(matching);
@@ -1228,12 +1311,12 @@ bool MainWindow::refreshDriveList(bool startup)
         if (!m_selfTestTarget.isEmpty()) {
             // 自检明确指定了目标目录却没匹配上：**绝不能悄悄换一个** ——
             // 换到另一块盘上的代价是往那块盘上真写数据。
-            statusBar()->showMessage(kSelfTestTargetMissing.arg(m_selfTestTarget));
+            statusBar()->showMessage(kSelfTestTargetMissing().arg(m_selfTestTarget));
         } else if (startup) {
             // **启动时不预选任何分区**：列表照常列出来，但一行都不选。
             // 第一行常常是系统盘，默认选中它意味着"打开程序就能直接点开始测"，
             // 很容易顺手把系统盘写了。选盘这件事必须由用户主动做一次。
-            statusBar()->showMessage(kStatusSelectDriveHint);
+            statusBar()->showMessage(kStatusSelectDriveHint());
         }
     }
 
@@ -1242,7 +1325,7 @@ bool MainWindow::refreshDriveList(bool startup)
     // 自检那条路径有自己的"找不到目标"提示，别在这里覆盖掉它。
     if (m_selfTestTarget.isEmpty() && !m_targetDir.isEmpty()
         && !QFileInfo(m_targetDir).isDir()) {
-        statusBar()->showMessage(kTargetGone.arg(m_targetDir));
+        statusBar()->showMessage(kTargetGone().arg(m_targetDir));
         m_targetDir.clear();
     }
 
@@ -1259,12 +1342,12 @@ void MainWindow::refreshTargetInfo()
 {
     const FioConfig cfg = configFromUi();
     if (cfg.targetDir.isEmpty()) {
-        m_targetLabel->setText(kTargetNotSelected);
+        m_targetLabel->setText(kTargetNotSelected());
         m_diskBar->setValue(0);
         m_diskBar->setStyleSheet(QString());
         // 三块都要清：条形本身不显示文字（setTextVisible(false)），
         // 空间和百分比是旁边两个标签，漏掉任何一个都会留着上一个盘的残留值。
-        m_diskSpaceLabel->setText(kDiskSpaceUnselected);
+        m_diskSpaceLabel->setText(kDiskSpaceUnselected());
         m_diskSpaceLabel->setStyleSheet(QStringLiteral("color:#666;"));
         m_diskBarLabel->clear();
         return;
@@ -1273,46 +1356,46 @@ void MainWindow::refreshTargetInfo()
     quint64 total = 0;
     quint64 free = 0;
     if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
-        m_targetLabel->setText(kErrReadCapacity.arg(cfg.targetDir));
+        m_targetLabel->setText(kErrReadCapacity().arg(cfg.targetDir));
         return;
     }
 
     refreshDiskBar(total, free);
 
     const FioConfig::FilePlan plan = cfg.planFiles(total, free);
-    QString text = kTargetFolderFmt.arg(QDir::toNativeSeparators(cfg.testFolder()));
+    QString text = kTargetFolderFmt().arg(QDir::toNativeSeparators(cfg.testFolder()));
 
     // **必须把"这个目录落在哪个文件系统上"摊开说**：
     // 容量和"写满"针对的是整个文件系统，不是用户选的那个目录。
     // 选了 /home/xxx 却把整个 / 写满，不说清楚就是个坑。
     const QStorageInfo info(cfg.targetDir);
     if (info.isValid() && info.isReady()) {
-        const QString device = info.device().isEmpty() ? kTextUnknownDevice : info.device();
-        text += kTargetFilesystemFmt.arg(device, info.fileSystemType(), info.rootPath());
+        const QString device = info.device().isEmpty() ? kTextUnknownDevice() : info.device();
+        text += kTargetFilesystemFmt().arg(device, info.fileSystemType(), info.rootPath());
         if (normalizedRoot(info.rootPath()) != normalizedRoot(cfg.targetDir)) {
-            text += kTargetFillWholeFmt.arg(info.displayName().isEmpty()
+            text += kTargetFillWholeFmt().arg(info.displayName().isEmpty()
                                                 ? info.rootPath()
                                                 : info.displayName(),
                                             formatBytes(quint64(info.bytesTotal())));
         }
         if (isNetworkFileSystem(info.fileSystemType()))
-            text += kTargetNetworkWarn;
+            text += kTargetNetworkWarn();
     }
 
     if (cfg.testMode == FioConfig::TestMode::Performance) {
         // 性能测试固定单文件、大小是用户选的，"将写入 N 个文件"那句在这里没意义，不显示。
         const FioConfig::FilePlan perfPlan = FioConfig::planFilesForSize(cfg.perfDataBytes);
         if (perfPlan.isValid())
-            text += kTargetPerfPlanFmt.arg(formatBytes(quint64(perfPlan.totalBytes)));
+            text += kTargetPerfPlanFmt().arg(formatBytes(quint64(perfPlan.totalBytes)));
     } else if (plan.isValid()) {
-        text += kTargetPlanFmt
+        text += kTargetPlanFmt()
                     .arg(plan.fileCount)
                     .arg(formatBytes(quint64(plan.fileSize)), formatBytes(quint64(plan.totalBytes)));
     } else {
-        text += kTargetNoSpaceForPlan;
+        text += kTargetNoSpaceForPlan();
     }
     if (m_selfTestFillLimit > 0)
-        text += kTargetSelfTestFillLimit.arg(m_selfTestFillLimit);
+        text += kTargetSelfTestFillLimit().arg(m_selfTestFillLimit);
     m_targetLabel->setText(text);
 }
 
@@ -1321,7 +1404,7 @@ void MainWindow::refreshDiskBar(quint64 total, quint64 free)
     if (total == 0) {
         m_diskBar->setValue(0);
         m_diskBar->setStyleSheet(QString());
-        m_diskSpaceLabel->setText(kDiskSpaceUnselected);
+        m_diskSpaceLabel->setText(kDiskSpaceUnselected());
         m_diskBarLabel->clear();
         return;
     }
@@ -1352,10 +1435,10 @@ void MainWindow::refreshDiskBar(quint64 total, quint64 free)
                        "QProgressBar::chunk { background:%1; border-radius:3px; }")
             .arg(chunkColor));
 
-    m_diskSpaceLabel->setText(kDiskSpaceAvailable
+    m_diskSpaceLabel->setText(kDiskSpaceAvailable()
                                   .arg(formatBytes(free), formatBytes(total)));
     m_diskSpaceLabel->setStyleSheet(QStringLiteral("color:#333;"));
-    m_diskBarLabel->setText(kDiskBarUsedPercent.arg(percent, 0, 'f', 1));
+    m_diskBarLabel->setText(kDiskBarUsedPercent().arg(percent, 0, 'f', 1));
     m_diskBarLabel->setStyleSheet(QStringLiteral("color:%1;").arg(textColor));
 }
 
@@ -1380,20 +1463,20 @@ void MainWindow::updateReadAvailability()
     m_readCheck->setEnabled(hasFiles || willWrite);
     if (!hasFiles && !willWrite) {
         m_readCheck->setChecked(false);
-        m_readCheck->setToolTip(kReadNoFilesTip
+        m_readCheck->setToolTip(kReadNoFilesTip()
             .arg(QDir::toNativeSeparators(folder)));
     } else if (hasFiles) {
-        m_readCheck->setToolTip(kReadAvailableTip
+        m_readCheck->setToolTip(kReadAvailableTip()
                                     .arg(QDir::toNativeSeparators(folder)));
     } else {
-        m_readCheck->setToolTip(kReadNeedWriteTip);
+        m_readCheck->setToolTip(kReadNeedWriteTip());
     }
 
     m_blockSizeLabel->setText(
         FioConfig::modeFromKey(m_modeCombo->currentData().toString())
                 == FioConfig::RwMode::SequentialWriteRead
-            ? kBlockSizeSeq
-            : kBlockSizeRand);
+            ? kBlockSizeSeq()
+            : kBlockSizeRand());
 }
 
 /// 目标分区里已经有测试文件时，问一句要不要覆盖。
@@ -1417,14 +1500,14 @@ bool MainWindow::confirmOverwriteTestFiles()
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(kDlgOverwriteTitle);
-    QString body = kMsgOverwriteBody.arg(QDir::toNativeSeparators(folder))
+    box.setWindowTitle(kDlgOverwriteTitle());
+    QString body = kMsgOverwriteBody().arg(QDir::toNativeSeparators(folder))
                        .arg(existing.count)
                        .arg(formatBytes(quint64(existing.totalBytes)));
     body += stateFilesNote(existing);
     box.setText(body);
-    QPushButton *go = box.addButton(kBtnContinue, QMessageBox::AcceptRole);
-    QPushButton *cancel = box.addButton(kBtnCancel, QMessageBox::RejectRole);
+    QPushButton *go = box.addButton(kBtnContinue(), QMessageBox::AcceptRole);
+    QPushButton *cancel = box.addButton(kBtnCancel(), QMessageBox::RejectRole);
     box.setDefaultButton(cancel);   // 默认落在「取消」上，别让回车顺手删了数据
     box.exec();
 
@@ -1446,7 +1529,7 @@ void MainWindow::onWriteCheckToggled(bool checked)
     m_suppressOverwritePrompt = true;
     m_writeCheck->setChecked(false);
     m_suppressOverwritePrompt = false;
-    recordOutput(kLogOverwriteCancelled);
+    recordOutput(kLogOverwriteCancelled());
 }
 
 void MainWindow::onOptionsChanged()
@@ -1465,7 +1548,7 @@ void MainWindow::buildPerfPage(QWidget *page)
     layout->setSpacing(8);
 
     // ---- 测试数据大小 ----
-    auto *optBox = new QGroupBox(kGroupTestParams, page);
+    auto *optBox = new QGroupBox(kGroupTestParams(), page);
     auto *optForm = new QFormLayout(optBox);
     optForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
     m_perfSizeCombo = new QComboBox(optBox);
@@ -1473,15 +1556,15 @@ void MainWindow::buildPerfPage(QWidget *page)
         m_perfSizeCombo->addItem(FioConfig::perfSizeText(bytes), QVariant::fromValue(bytes));
     m_perfSizeCombo->setCurrentIndex(int(FioConfig::perfSizeChoices().indexOf(
         qint64(1024) * 1024 * 1024)));
-    m_perfSizeCombo->setToolTip(kPerfSizeTip);
+    m_perfSizeCombo->setToolTip(kPerfSizeTip());
     // 换了数据大小，磁盘区那行"测试数据: 单个文件 …"要立刻跟着变，不用手动点刷新
     connect(m_perfSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { refreshTargetInfo(); });
-    optForm->addRow(kLabelPerfSize, m_perfSizeCombo);
+    optForm->addRow(kLabelPerfSize(), m_perfSizeCombo);
     layout->addWidget(optBox);
 
     // ---- 测试项 + 结果表：勾选在左，数据在右（排版照 example.png）----
-    auto *itemBox = new QGroupBox(kGroupPerfItems.arg(FioConfig::perfRuntimeSeconds()), page);
+    auto *itemBox = new QGroupBox(kGroupPerfItems().arg(FioConfig::perfRuntimeSeconds()), page);
     auto *grid = new QGridLayout(itemBox);
     grid->setContentsMargins(6, 6, 6, 6);
     grid->setHorizontalSpacing(8);
@@ -1491,8 +1574,8 @@ void MainWindow::buildPerfPage(QWidget *page)
     grid->setColumnStretch(1, 2);
     grid->setColumnStretch(2, 2);
 
-    auto *headRead = new QLabel(kPerfColRead, itemBox);
-    auto *headWrite = new QLabel(kPerfColWrite, itemBox);
+    auto *headRead = new QLabel(kPerfColRead(), itemBox);
+    auto *headWrite = new QLabel(kPerfColWrite(), itemBox);
     for (QLabel *label : {headRead, headWrite}) {
         QFont font = label->font();
         font.setBold(true);
@@ -1559,13 +1642,13 @@ FioConfig::TestMode MainWindow::currentTestMode() const
 
 void MainWindow::updateWindowTitle()
 {
-    setWindowTitle(kWindowTitleFmt.arg(kAppName, kAppVersion, currentModeName()));
+    setWindowTitle(kWindowTitleFmt().arg(kAppName(), kAppVersion(), currentModeName()));
 }
 
 QString MainWindow::currentModeName() const
 {
-    return currentTestMode() == FioConfig::TestMode::Performance ? kModeNamePerformance
-                                                                 : kModeNameReliability;
+    return currentTestMode() == FioConfig::TestMode::Performance ? kModeNamePerformance()
+                                                                 : kModeNameReliability();
 }
 
 void MainWindow::commitPerfResultsToCurrentTarget()
@@ -1684,8 +1767,8 @@ void MainWindow::onDriveSelectionChanged()
 void MainWindow::onBrowseFio()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, kDlgChooseFioTitle, m_fioPathEdit->text(),
-        kFilterExecutable);
+        this, kDlgChooseFioTitle(), m_fioPathEdit->text(),
+        kFilterExecutable());
     if (!path.isEmpty())
         m_fioPathEdit->setText(QDir::cleanPath(path));
 }
@@ -1694,8 +1777,8 @@ void MainWindow::onOpenTestDirectory()
 {
     const FioConfig cfg = configFromUi();
     if (cfg.targetDir.isEmpty()) {
-        reportProblem(kErrNoDriveSelected,
-                      kErrNoDriveSelectedDetail);
+        reportProblem(kErrNoDriveSelected(),
+                      kErrNoDriveSelectedDetail());
         return;
     }
     const QString folder = cfg.testFolder();
@@ -1706,7 +1789,7 @@ void MainWindow::onOpenTestDirectory()
 void MainWindow::onCleanupTestFiles()
 {
     if (m_runner->isBusy()) {
-        reportProblem(kErrBusy, kErrStopBeforeCleanup);
+        reportProblem(kErrBusy(), kErrStopBeforeCleanup());
         return;
     }
     const FioConfig cfg = configFromUi();
@@ -1716,20 +1799,20 @@ void MainWindow::onCleanupTestFiles()
     const QString folder = cfg.testFolder();
     const TestFileSet set = scanTestFiles(folder);
     if (set.isEmpty()) {
-        reportProblem(kErrNoTestFiles,
-                      kErrNoTestFilesInFolder
+        reportProblem(kErrNoTestFiles(),
+                      kErrNoTestFilesInFolder()
                           .arg(QDir::toNativeSeparators(folder)));
         return;
     }
 
     if (!m_selfTestMode) {
-        const QString body = kMsgConfirmCleanup
+        const QString body = kMsgConfirmCleanup()
                                  .arg(QDir::toNativeSeparators(folder))
                                  .arg(set.count)
                                  .arg(formatBytes(quint64(set.totalBytes)))
                              + stateFilesNote(set);
         const auto answer = QMessageBox::question(
-            this, kDlgCleanupTitle, body,
+            this, kDlgCleanupTitle(), body,
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (answer != QMessageBox::Yes)
             return;
@@ -1737,11 +1820,11 @@ void MainWindow::onCleanupTestFiles()
 
     QString error;
     if (!clearTestFiles(folder, &error)) {
-        reportProblem(kErrCleanupFailed, error, true);
+        reportProblem(kErrCleanupFailed(), error, true);
         return;
     }
-    recordOutput(kStatusCleanedFiles.arg(set.count));
-    statusBar()->showMessage(kStatusCleanedFiles.arg(set.count));
+    recordOutput(kStatusCleanedFiles().arg(set.count));
+    statusBar()->showMessage(kStatusCleanedFiles().arg(set.count));
     refreshDriveList();
     refreshTargetInfo();
     updateReadAvailability();
@@ -1753,8 +1836,8 @@ void MainWindow::onSaveRunData()
     // 可靠性的采样在 m_readSamples，性能的整轮数据在 m_perfRunTimes。
     const bool perf = (m_activeConfig.testMode == FioConfig::TestMode::Performance);
     if ((perf ? m_perfRunTimes.size() : m_readSamples.size()) <= 0) {
-        reportProblem(kErrNoDataToSave,
-                      kErrNoSamplesYet);
+        reportProblem(kErrNoDataToSave(),
+                      kErrNoSamplesYet());
         return;
     }
 
@@ -1771,26 +1854,26 @@ void MainWindow::onSaveRunData()
     // 文件名带上模式和时间戳（ml_disktest-可靠性测试-20261012-183000.csv）：
     // 一次会话可能两种模式都跑过，都叫 ml_disktest-data.csv 会互相覆盖，
     // 隔几天再看也分不清是哪次的结果。
-    const QString kind = perf ? kModeNamePerformance : kModeNameReliability;
-    const QString stamp = QDateTime::currentDateTime().toString(kRunDataTimeStampFmt);
+    const QString kind = perf ? kModeNamePerformance() : kModeNameReliability();
+    const QString stamp = QDateTime::currentDateTime().toString(kRunDataTimeStampFmt());
     const QString suggested =
         QDir(QCoreApplication::applicationDirPath())
-            .absoluteFilePath(kRunDataFileNameFmt.arg(kind, stamp));
+            .absoluteFilePath(kRunDataFileNameFmt().arg(kind, stamp));
     const QString path = QFileDialog::getSaveFileName(
-        this, kDlgSaveDataTitle, suggested,
-        kFilterCsv);
+        this, kDlgSaveDataTitle(), suggested,
+        kFilterCsv());
     if (path.isEmpty())
         return;
 
     QString error;
     if (!saveRunDataTo(path, &error)) {
-        reportProblem(kTextSaveFailed, error, true);
+        reportProblem(kTextSaveFailed(), error, true);
         return;
     }
     // 状态栏里的采样点数按模式取，性能模式的数据不在 m_readSamples 里
     const int saved = perf ? m_perfRunTimes.size() : m_readSamples.size();
-    statusBar()->showMessage(kStatusRunDataSaved.arg(saved).arg(path), 15000);
-    recordOutput(kReportDataSaved.arg(path));
+    statusBar()->showMessage(kStatusRunDataSaved().arg(saved).arg(path), 15000);
+    recordOutput(kReportDataSaved().arg(path));
 }
 
 bool MainWindow::saveRunDataTo(const QString &path, QString *error)
@@ -1802,7 +1885,7 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
     const int sampleCount = perf ? m_perfRunTimes.size() : m_readSamples.size();
     if (sampleCount <= 0) {
         if (error)
-            *error = kErrNoSamplesYet;
+            *error = kErrNoSamplesYet();
         return false;
     }
 
@@ -1826,7 +1909,7 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
     // 写这份结果的程序版本。打开时按它判断支不支持：
     // 低于 RunData::minimumReadableVersion() 的一律拒收并提示"版本过旧"。
     // 版本号只有 CMakeLists.txt 的 project(... VERSION) 一个来源。
-    param(QStringLiteral("app_version"), kAppVersion);
+    param(QStringLiteral("app_version"), kAppVersion());
     // 先写模式：读的时候靠它决定用容量轴还是时间轴渲染。
     // 老文件没有这一行，读取侧会退回"按字段推断"，并且默认按可靠性。
     param(RunData::testModeKey(),
@@ -1974,10 +2057,10 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
 void MainWindow::onLoadRunData()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, kDlgLoadDataTitle,
+        this, kDlgLoadDataTitle(),
         // 默认打开程序自己所在的目录：测试数据一般就存在程序旁边
         QCoreApplication::applicationDirPath(),
-        kFilterCsv);
+        kFilterCsv());
     if (path.isEmpty())
         return;
 
@@ -2011,7 +2094,7 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
     // 正在跑测试时不动图表：自检那条路也一样，否则会把实时曲线覆盖掉
     if (m_runner->isBusy()) {
         if (error)
-            *error = kErrBusyLoading;
+            *error = kErrBusyLoading();
         return false;
     }
 
@@ -2068,21 +2151,21 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
     updateStateLabel(); // 已停止
 
     QStringList info;
-    info << kStatusSamplesLoaded.arg(runData.sampleCount());
+    info << kStatusSamplesLoaded().arg(runData.sampleCount());
     if (runData.hasParam(QStringLiteral("mode")))
         info << runData.param(QStringLiteral("mode"));
     if (runData.hasParam(QStringLiteral("target")))
         info << runData.param(QStringLiteral("target"));
-    QString message = info.join(kTextJoinDot);
+    QString message = info.join(kTextJoinDot());
     // 有跳过的采样行就明说：这份数据是**不完整的**，静默少画几个点
     // 会让人拿一条缺口的曲线当成真实曲线。
     if (runData.droppedSampleCount() > 0)
-        message += kStatusSkippedLines.arg(runData.droppedSampleCount());
+        message += kStatusSkippedLines().arg(runData.droppedSampleCount());
     statusBar()->showMessage(message);
-    recordOutput(kReportLoadData.arg(path));
+    recordOutput(kReportLoadData().arg(path));
     recordOutput(message);
     if (runData.hasParam(QStringLiteral("mode"))) {
-        recordOutput(kReportLoadedConfig
+        recordOutput(kReportLoadedConfig()
                          .arg(runData.param(QStringLiteral("mode")),
                               runData.param(QStringLiteral("block_size")),
                               runData.param(QStringLiteral("iodepth")),
@@ -2090,9 +2173,9 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
     }
     // 这份文件是性能还是可靠性数据，写进日志：报告里那一行"测试配置"来自
     // 当前界面（自检时并不是这份数据的配置），有个明确的模式标记才好核对。
-    recordOutput(kReportLoadedMode.arg(
-        runData.mode == RunData::Mode::Performance ? kModeNamePerformance
-                                                   : kModeNameReliability));
+    recordOutput(kReportLoadedMode().arg(
+        runData.mode == RunData::Mode::Performance ? kModeNamePerformance()
+                                                   : kModeNameReliability()));
 
     // 加载完直接显示图表：原来忘了切页，明明加载了数据，图表位置还是"请先开始测试"。
     m_chartStack->setCurrentIndex(1);
@@ -2102,49 +2185,49 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
 void MainWindow::onSaveDiagnostics()
 {
     if (m_logLines.isEmpty()) {
-        reportProblem(kErrNoContentToSave,
-                      kErrNoOutputYet);
+        reportProblem(kErrNoContentToSave(),
+                      kErrNoOutputYet());
         return;
     }
     const QString suggested = QDir(QDir::tempPath())
                                   .absoluteFilePath(QStringLiteral("ml_disktest-fio-output.log"));
     const QString path = QFileDialog::getSaveFileName(
-        this, kDlgSaveDiagnosticsTitle, suggested,
-        kFilterTextLog);
+        this, kDlgSaveDiagnosticsTitle(), suggested,
+        kFilterTextLog());
     if (path.isEmpty())
         return;
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        reportProblem(kTextSaveFailed, file.errorString(), true);
+        reportProblem(kTextSaveFailed(), file.errorString(), true);
         return;
     }
     QTextStream out(&file);
     out << m_logLines.join(QLatin1Char('\n')) << '\n';
     file.close();
-    statusBar()->showMessage(kStatusDiagnosticsSaved.arg(path), 10000);
+    statusBar()->showMessage(kStatusDiagnosticsSaved().arg(path), 10000);
 }
 
 void MainWindow::onAbout()
 {
     // 用实例而不是 QMessageBox::about()：后者是静态函数，加不了自定义按钮。
     QMessageBox box(this);
-    box.setWindowTitle(kDlgAboutTitle);
+    box.setWindowTitle(kDlgAboutTitle());
     box.setIcon(QMessageBox::Information);
     box.setTextFormat(Qt::RichText);
-    box.setText(kAboutHtml
-                    .arg(kAppName, kAppVersion, kAuthor, kContact, kBuildTime,
+    box.setText(kAboutHtml()
+                    .arg(kAppName(), kAppVersion(), kAuthor(), kContact(), kBuildTime(),
                          QString::fromLatin1(qVersion()),
-                         isProcessElevated() ? kModeElevated : kModeNormal,
+                         isProcessElevated() ? kModeElevated() : kModeNormal(),
                          FioConfig::folderName(), FioConfig::fileBaseName(),
-                         kAppArch));
-    QPushButton *update = box.addButton(kBtnCheckUpdate, QMessageBox::ActionRole);
-    box.addButton(kBtnClose, QMessageBox::RejectRole);
+                         kAppArch()));
+    QPushButton *update = box.addButton(kBtnCheckUpdate(), QMessageBox::ActionRole);
+    box.addButton(kBtnClose(), QMessageBox::RejectRole);
     box.exec();
     if (box.clickedButton() == update) {
         // 交给系统浏览器：程序里不联网、不解析 HTML、不处理重定向，
         // 也不去猜"有没有新版本"——那需要读 GitHub API，还会引入网络依赖。
-        QDesktopServices::openUrl(QUrl(kReleasesLatestUrl));
+        QDesktopServices::openUrl(QUrl(kReleasesLatestUrl()));
     }
 }
 
@@ -2298,7 +2381,7 @@ bool MainWindow::clearTestFiles(const QString &folder, QString *error)
         const QString path = dir.absoluteFilePath(name);
         if (!QFile::remove(path)) {
             if (error)
-                *error = kErrDeleteOldFiles.arg(path);
+                *error = kErrDeleteOldFiles().arg(path);
             return false;
         }
     }
@@ -2314,7 +2397,7 @@ bool MainWindow::ensureTestFolder(const QString &folder, QString *error)
         return true;
     if (!QDir().mkpath(folder)) {
         if (error)
-            *error = kErrCreateFolder.arg(folder);
+            *error = kErrCreateFolder().arg(folder);
         return false;
     }
     return true;
@@ -2348,10 +2431,10 @@ void MainWindow::onStart()
     // 因为"自检写错盘"的代价是往系统盘上真写数据。
     if (m_selfTestMode && !m_selfTestTarget.isEmpty()
         && !sameFileSystem(cfg.targetDir, m_selfTestTarget)) {
-        abortStart(kErrTargetMismatch,
-                   kMsgSelfTestTargetMismatch
+        abortStart(kErrTargetMismatch(),
+                   kMsgSelfTestTargetMismatch()
                        .arg(m_selfTestTarget,
-                            cfg.targetDir.isEmpty() ? kTextNoneInParens : cfg.targetDir));
+                            cfg.targetDir.isEmpty() ? kTextNoneInParens() : cfg.targetDir));
         return;
     }
 
@@ -2362,14 +2445,14 @@ void MainWindow::onStart()
 
     QString error;
     if (!cfg.validate(&error)) {
-        abortStart(kErrBadParams, error);
+        abortStart(kErrBadParams(), error);
         return;
     }
 
     const QString fioPath = m_fioPathEdit->text().trimmed();
     if (fioPath.isEmpty() || !QFileInfo::exists(fioPath)) {
-        abortStart(kErrFioNotFound,
-                   kErrSpecifyFioPath);
+        abortStart(kErrFioNotFound(),
+                   kErrSpecifyFioPath());
         return;
     }
     m_runner->setFioPath(fioPath);
@@ -2408,9 +2491,9 @@ void MainWindow::onStart()
     m_roundOutcomeStart = 0;
 
     m_chartStack->setCurrentIndex(1);   // 第一次开始测试才显示图表
-    recordOutput(kReportTestStart);
-    recordOutput(kReportConfig.arg(cfg.describe()));
-    recordOutput(kReportTargetFolder.arg(QDir::toNativeSeparators(folder)));
+    recordOutput(kReportTestStart());
+    recordOutput(kReportConfig().arg(cfg.describe()));
+    recordOutput(kReportTargetFolder().arg(QDir::toNativeSeparators(folder)));
 
     if (cfg.testMode == FioConfig::TestMode::Performance) {
         startPerfRun();
@@ -2418,7 +2501,7 @@ void MainWindow::onStart()
     }
 
     if (m_totalRounds > 1)
-        logEvent(kLogRoundsPlanned.arg(m_totalRounds));
+        logEvent(kLogRoundsPlanned().arg(m_totalRounds));
 
     startNextRound();
 }
@@ -2440,9 +2523,9 @@ void MainWindow::startNextRound()
     m_roundOutcomeStart = m_outcomes.size();
 
     if (m_totalRounds > 1)
-        logEvent(kLogRoundStart.arg(m_currentRound).arg(m_totalRounds));
+        logEvent(kLogRoundStart().arg(m_currentRound).arg(m_totalRounds));
     else
-        logEvent(kLogRoundStartOne);
+        logEvent(kLogRoundStartOne());
 
     QString error;
 
@@ -2450,12 +2533,12 @@ void MainWindow::startNextRound()
         // 只读：直接用现成的测试文件，**不删**
         const TestFileSet existing = scanTestFiles(folder);
         if (existing.isEmpty()) {
-            abortStart(kErrNoTestFiles,
-                       kErrNoTestFilesForRead
+            abortStart(kErrNoTestFiles(),
+                       kErrNoTestFilesForRead()
                            .arg(QDir::toNativeSeparators(folder)));
             return;
         }
-        recordOutput(kReportReadOnlyMode
+        recordOutput(kReportReadOnlyMode()
                          .arg(existing.count)
                          .arg(formatBytes(quint64(existing.totalBytes))));
         // 坏块位置换算的基准：用**盘上这些文件的实际大小**。
@@ -2484,8 +2567,8 @@ void MainWindow::startNextRound()
     // 不加这一道就会在用户毫不知情的情况下删掉旧数据。
     // 第二圈之后不再问：那些文件本来就是这个测试自己刚写出来的。
     if (m_currentRound == 1 && !confirmOverwriteTestFiles()) {
-        recordOutput(kLogOverwriteCancelled);
-        logEvent(kLogOverwriteCancelled, true);
+        recordOutput(kLogOverwriteCancelled());
+        logEvent(kLogOverwriteCancelled(), true);
         setRunningState(false);
         m_phase = Phase::Idle;
         updateStateLabel();
@@ -2496,14 +2579,14 @@ void MainWindow::startNextRound()
 
     const TestFileSet oldFiles = scanTestFiles(folder);
     if (!oldFiles.isEmpty())
-        statusBar()->showMessage(kStatusCleaningOldFiles);
+        statusBar()->showMessage(kStatusCleaningOldFiles());
 
     if (!clearTestFiles(folder, &error)) {
-        abortStart(kErrCleanupOldFailed, error, true);
+        abortStart(kErrCleanupOldFailed(), error, true);
         return;
     }
     if (!ensureTestFolder(folder, &error)) {
-        abortStart(kErrCreateFolderFailed, error, true);
+        abortStart(kErrCreateFolderFailed(), error, true);
         return;
     }
     // 目录已经有了，正好在这里验一次 direct=1 能不能用（Linux 上是 O_DIRECT）。
@@ -2511,15 +2594,15 @@ void MainWindow::startNextRound()
     // 又不会等 fio 跑起来才以一个看不懂的 "Operation not supported" 收场。
     // Windows 上这个函数恒返回 true，等于不做事。
     if (!supportsDirectIo(folder, &error)) {
-        abortStart(kMsgNoDirectIoTitle,
-                   kErrNoDirectIo.arg(QDir::toNativeSeparators(folder), error), true);
+        abortStart(kMsgNoDirectIoTitle(),
+                   kErrNoDirectIo().arg(QDir::toNativeSeparators(folder), error), true);
         return;
     }
     if (!oldFiles.isEmpty()) {
         if (m_currentRound > 1)
-            logEvent(kLogRoundCleanNext.arg(oldFiles.count));
+            logEvent(kLogRoundCleanNext().arg(oldFiles.count));
         else
-            logEvent(kLogCleanedOldFiles.arg(oldFiles.count));
+            logEvent(kLogCleanedOldFiles().arg(oldFiles.count));
     }
     updateDiskBarFor(cfg.targetDir);
 
@@ -2527,15 +2610,15 @@ void MainWindow::startNextRound()
     quint64 total = 0;
     quint64 free = 0;
     if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
-        abortStart(kErrReadCapacityFailed,
-                   kErrReadCapacity.arg(cfg.targetDir));
+        abortStart(kErrReadCapacityFailed(),
+                   kErrReadCapacity().arg(cfg.targetDir));
         return;
     }
 
     const FioConfig::FilePlan plan = cfg.planFiles(total, free);
     if (!plan.isValid()) {
-        abortStart(kErrNoSpace,
-                   kErrNoWritableSpace
+        abortStart(kErrNoSpace(),
+                   kErrNoWritableSpace()
                        .arg(formatBytes(free)));
         return;
     }
@@ -2551,10 +2634,10 @@ void MainWindow::startNextRound()
     // 新一圈开始：把上一圈的坏块标记清掉（本轮的位置由本轮的偏移重新算）
     if (m_chart)
         m_chart->clearVerifyMarkers();
-    recordOutput(kReportVolumeSpace
+    recordOutput(kReportVolumeSpace()
                      .arg(formatBytes(total), formatBytes(free),
                           formatBytes(quint64(FioConfig::reserveBytes(total)))));
-    recordOutput(kReportWritePlan
+    recordOutput(kReportWritePlan()
                      .arg(plan.fileCount)
                      .arg(formatBytes(quint64(plan.fileSize)),
                           formatBytes(quint64(plan.totalBytes))));
@@ -2584,7 +2667,7 @@ void MainWindow::prepareCapacityAxis(qint64 totalBytes)
     const double gib = double(m_axisByteTotal) / (1024.0 * 1024.0 * 1024.0);
     m_chart->setCapacityAxis(gib);
     applyDensity();   // 低密度档的抽稀步长取决于数据量，这里一并定下来
-    recordOutput(kReportAxisFixed
+    recordOutput(kReportAxisFixed()
                      .arg(formatBytes(quint64(m_axisByteTotal))));
 }
 
@@ -2594,21 +2677,21 @@ void MainWindow::beginWritePhase()
     const QString folder = cfg.testFolder();
 
     const QString jobText = cfg.writeJobFileText(m_activePlan);
-    recordOutput(kReportWriteJobHeader);
+    recordOutput(kReportWriteJobHeader());
     for (const QString &line : jobText.split(QLatin1Char('\n')))
         recordOutput(line);
 
     QString error;
     m_jobFilePath = FioRunner::writeJobFile(jobText, QStringLiteral("ml_disktest-write.fio"), &error);
     if (m_jobFilePath.isEmpty()) {
-        reportProblem(kErrCreateJobFile, error, true);
+        reportProblem(kErrCreateJobFile(), error, true);
         setRunningState(false);
         updateStateLabel();
         return;
     }
 
     m_phase = Phase::Writing;
-    logEvent(kLogPhaseWrite);
+    logEvent(kLogPhaseWrite());
     m_phaseRead = false;    // 写入阶段只有写流量
     m_phaseWrite = true;
     m_plotRead = m_plotRead || m_phaseRead;
@@ -2621,12 +2704,12 @@ void MainWindow::beginWritePhase()
 
     if (!m_runner->startJob(folder, m_jobFilePath, cfg.writeExtraArguments(),
                             JobKind::Write, &error)) {
-        reportProblem(kErrStartWritePhase, error, true);
+        reportProblem(kErrStartWritePhase(), error, true);
         setRunningState(false);
         updateStateLabel();
         return;
     }
-    statusBar()->showMessage(kStatusWriting);
+    statusBar()->showMessage(kStatusWriting());
     if (m_selfTestMode && m_selfTestStopAfter > 0)
         QTimer::singleShot(m_selfTestStopAfter * 1000, this, &MainWindow::onStop);
 }
@@ -2638,33 +2721,33 @@ void MainWindow::beginReadPhase()
 
     const TestFileSet set = scanTestFiles(folder);
     if (set.isEmpty()) {
-        reportProblem(kErrNoTestFiles,
-                      kErrNoTestFilesAtReadStart
+        reportProblem(kErrNoTestFiles(),
+                      kErrNoTestFilesAtReadStart()
                           .arg(QDir::toNativeSeparators(folder)));
         finishWholeTest();
         return;
     }
 
-    recordOutput(kReportReadPhaseFiles
+    recordOutput(kReportReadPhaseFiles()
                      .arg(set.count)
                      .arg(formatBytes(quint64(set.totalBytes))));
 
     const QString jobText = cfg.readJobFileText(set.count, set.totalBytes);
-    recordOutput(kReportReadJobHeader);
+    recordOutput(kReportReadJobHeader());
     for (const QString &line : jobText.split(QLatin1Char('\n')))
         recordOutput(line);
 
     QString error;
     m_jobFilePath = FioRunner::writeJobFile(jobText, QStringLiteral("ml_disktest-read.fio"), &error);
     if (m_jobFilePath.isEmpty()) {
-        reportProblem(kErrCreateJobFile, error, true);
+        reportProblem(kErrCreateJobFile(), error, true);
         setRunningState(false);
         updateStateLabel();
         return;
     }
 
     m_phase = Phase::Reading;
-    logEvent(kLogPhaseRead);
+    logEvent(kLogPhaseRead());
     m_phaseRead = true;
     m_phaseWrite = false;   // 读取阶段永远是纯读
     // 可见性是"并集"：写入阶段画过的蓝线要留在图上，不能被这一步藏掉
@@ -2679,12 +2762,12 @@ void MainWindow::beginReadPhase()
 
     if (!m_runner->startJob(folder, m_jobFilePath, cfg.readExtraArguments(),
                             JobKind::Read, &error)) {
-        reportProblem(kErrStartReadPhase, error, true);
+        reportProblem(kErrStartReadPhase(), error, true);
         setRunningState(false);
         updateStateLabel();
         return;
     }
-    statusBar()->showMessage(kStatusReading);
+    statusBar()->showMessage(kStatusReading());
     if (m_selfTestMode && m_selfTestStopAfter > 0)
         QTimer::singleShot(m_selfTestStopAfter * 1000, this, &MainWindow::onStop);
 }
@@ -2694,9 +2777,9 @@ void MainWindow::onStop()
     // 一旦按下停止就不再接收采样点：曲线停在按下这一刻，
     // 不会被收尾那一拍或被补到阶段终点的"闭合点"拖到横轴末尾。
     m_stopRequested = true;
-    logEvent(kLogStopRequested);
+    logEvent(kLogStopRequested());
     m_runner->stop();
-    statusBar()->showMessage(kStatusStopping);
+    statusBar()->showMessage(kStatusStopping());
 }
 
 void MainWindow::onIoRate(double readBytesPerSec, double writeBytesPerSec,
@@ -2823,8 +2906,8 @@ void MainWindow::onRunnerOutput(const QString &text)
 
 void MainWindow::onRunnerWarning(const QString &text)
 {
-    recordOutput(kReportWarningLine.arg(text));
-    logEvent(kLogWarnPrefix.arg(text), true);   // 异常用红字
+    recordOutput(kReportWarningLine().arg(text));
+    logEvent(kLogWarnPrefix().arg(text), true);   // 异常用红字
 }
 
 void MainWindow::updateVerifyBanner()
@@ -2835,7 +2918,7 @@ void MainWindow::updateVerifyBanner()
         m_verifyBanner->setVisible(false);
         return;
     }
-    m_verifyBannerLabel->setText(kVerifyBannerHead.arg(m_verifyFailures));
+    m_verifyBannerLabel->setText(kVerifyBannerHead().arg(m_verifyFailures));
     m_verifyBanner->setVisible(true);
 }
 
@@ -2864,9 +2947,9 @@ void MainWindow::onVerifyFailure(int totalCount, const QString &text,
     // 实时把告警条挂出来，并在日志/报告里记下**这一处的偏移量**。
     // text 是这一批里最后一条原话，不是第一条——每处的偏移量都要留下，
     // 否则日志里会看着像"所有失败都在同一个位置"。
-    logEvent(kLogVerifyFailure.arg(totalCount).arg(text), true);
-    recordOutput(kReportVerifyLine.arg(totalCount).arg(text));
-    statusBar()->showMessage(kStatusVerifyFailed.arg(totalCount));
+    logEvent(kLogVerifyFailure().arg(totalCount).arg(text), true);
+    recordOutput(kReportVerifyLine().arg(totalCount).arg(text));
+    statusBar()->showMessage(kStatusVerifyFailed().arg(totalCount));
     updateVerifyBanner();
 
     // 在图表上把这一处标出来：黄色背景色带，横坐标对准坏块在盘上的位置。
@@ -2943,10 +3026,10 @@ void MainWindow::onJobFinished(const FioResult &result)
                 m_perfValues.read[cellIndex] = value;
             rescalePerfCells();
         }
-        logEvent(kLogPerfPassDone.arg(FioConfig::perfItemName(item),
-                                      wasWritePass ? kPhaseWrite : kPhaseRead)
-                     .arg(wasWritePass ? (result.hasWrite ? formatSpeed(result.writeMiBs) : kTextNone)
-                                       : (result.hasRead ? formatSpeed(result.readMiBs) : kTextNone)),
+        logEvent(kLogPerfPassDone().arg(FioConfig::perfItemName(item),
+                                      wasWritePass ? kPhaseWrite() : kPhaseRead())
+                     .arg(wasWritePass ? (result.hasWrite ? formatSpeed(result.writeMiBs) : kTextNone())
+                                       : (result.hasRead ? formatSpeed(result.readMiBs) : kTextNone())),
                  !result.warnings.isEmpty());
 
         if (wasWritePass)
@@ -3000,7 +3083,7 @@ void MainWindow::onJobFinished(const FioResult &result)
     // 在结论里长得一模一样。这里只写一行红字，**不改结论**：
     // 汇总的解析依赖 fio 的输出格式，拿它去判 FAIL 有可能误伤好盘。
     if (stats.count == 0 && !result.hasRead && !result.hasWrite && !result.cancelled) {
-        logEvent(kLogPhaseDidNothing.arg(jobKindText(result.kind)), true);
+        logEvent(kLogPhaseDidNothing().arg(jobKindText(result.kind)), true);
     }
 
     PhaseOutcome outcome;
@@ -3041,7 +3124,7 @@ void MainWindow::onJobFinished(const FioResult &result)
                 // 图上能标的处数有上限。到顶了必须说一句，否则"告警说 900 处、
                 // 图上只有稀稀几条"会被读成"只有那几处坏"。
                 if (m_chart->droppedVerifyMarkerCount() > 0) {
-                    logEvent(kLogVerifyMarkersTruncated
+                    logEvent(kLogVerifyMarkersTruncated()
                                  .arg(m_chart->maxVerifyMarkers())
                                  .arg(m_chart->droppedVerifyMarkerCount()),
                              true);
@@ -3050,14 +3133,14 @@ void MainWindow::onJobFinished(const FioResult &result)
             // 先给总数，再逐处列出坏在哪。
             // **必须逐处列**：只报第一条会让人以为"只有那一个地方坏"，
             // 而实际上一块坏盘的失败点通常分散在很多偏移量上。
-            logEvent(kLogVerifySummary.arg(result.verifyFailures), true);
+            logEvent(kLogVerifySummary().arg(result.verifyFailures), true);
             for (const QString &line : result.verifyErrorLines)
                 logEvent(QStringLiteral("  ") + line, true);
             const int shown = result.verifyErrorLines.size();
             if (result.verifyFailures > shown)
-                logEvent(kLogVerifyTruncated.arg(shown).arg(result.verifyFailures));
+                logEvent(kLogVerifyTruncated().arg(shown).arg(result.verifyFailures));
         } else if (m_activeConfig.verify && !result.cancelled) {
-            logEvent(kLogVerifyNone);
+            logEvent(kLogVerifyNone());
         }
     }
 
@@ -3078,8 +3161,8 @@ void MainWindow::onJobFinished(const FioResult &result)
     }
     if (!nonVerifyWarnings.isEmpty() && !m_selfTestMode) {
         const QString detail = nonVerifyWarnings.join(QLatin1Char('\n'));
-        QMessageBox::warning(this, kMsgPhaseProblem.arg(jobKindText(result.kind)),
-                             detail + kMsgTestStoppedSuffix);
+        QMessageBox::warning(this, kMsgPhaseProblem().arg(jobKindText(result.kind)),
+                             detail + kMsgTestStoppedSuffix());
     }
 
     updateDiskBarFor(endRoot);
@@ -3091,11 +3174,11 @@ void MainWindow::onJobFinished(const FioResult &result)
     if (result.cancelled && result.kind == JobKind::Write) {
         QString error;
         if (clearTestFiles(m_activeConfig.testFolder(), &error)) {
-            recordOutput(kLogStoppedWriteCleaned);
-            logEvent(kLogStoppedWriteCleaned, true);
-            statusBar()->showMessage(kLogStoppedWriteCleaned);
+            recordOutput(kLogStoppedWriteCleaned());
+            logEvent(kLogStoppedWriteCleaned(), true);
+            statusBar()->showMessage(kLogStoppedWriteCleaned());
         } else {
-            recordOutput(kLogStoppedWriteCleanFailed.arg(error));
+            recordOutput(kLogStoppedWriteCleanFailed().arg(error));
         }
     }
 
@@ -3130,12 +3213,12 @@ void MainWindow::logRoundSummary()
         }
     }
 
-    const QString w = writeAvg.isEmpty() ? kTextNone : writeAvg.join(QLatin1Char('/'));
-    const QString r = readAvg.isEmpty() ? kTextNone : readAvg.join(QLatin1Char('/'));
+    const QString w = writeAvg.isEmpty() ? kTextNone() : writeAvg.join(QLatin1Char('/'));
+    const QString r = readAvg.isEmpty() ? kTextNone() : readAvg.join(QLatin1Char('/'));
     if (problems.isEmpty())
-        logEvent(kLogRoundSummary.arg(m_currentRound).arg(w, r));
+        logEvent(kLogRoundSummary().arg(m_currentRound).arg(w, r));
     else
-        logEvent(kLogRoundSummaryBad.arg(m_currentRound).arg(problems.join(QLatin1Char(';'))),
+        logEvent(kLogRoundSummaryBad().arg(m_currentRound).arg(problems.join(QLatin1Char(';'))),
                  true);
 }
 
@@ -3150,9 +3233,9 @@ void MainWindow::finishRound()
     }
 
     if (m_totalRounds > 1 && !m_stopRequested)
-        logEvent(kLogAllRoundsDone.arg(m_totalRounds));
+        logEvent(kLogAllRoundsDone().arg(m_totalRounds));
     else
-        logEvent(kLogOneRoundDone);
+        logEvent(kLogOneRoundDone());
 
     finishWholeTest();
 }
@@ -3202,7 +3285,7 @@ void MainWindow::dropTrailingTailSample()
     const double lastRate = (lastFlags & 2) ? m_writeSamples.at(n - 1)
                                             : m_readSamples.at(n - 1);
 
-    recordOutput(kLogDroppedTail.arg(formatSpeed(lastRate)));
+    recordOutput(kLogDroppedTail().arg(formatSpeed(lastRate)));
     m_readSamples.removeLast();
     m_writeSamples.removeLast();
     m_sampleTimes.removeLast();
@@ -3269,19 +3352,19 @@ void MainWindow::startPerfRun()
     // 否则 fio 的布局时间会混进 10 秒的测量窗口里。
     const FioConfig::FilePlan plan = FioConfig::planFilesForSize(cfg.perfDataBytes);
     if (!plan.isValid()) {
-        abortStart(kErrBadParams, kErrPerfDataSize);
+        abortStart(kErrBadParams(), kErrPerfDataSize());
         return;
     }
 
     quint64 total = 0;
     quint64 free = 0;
     if (!queryVolumeSpace(cfg.targetDir, &total, &free)) {
-        abortStart(kErrReadCapacityFailed, kErrReadCapacity.arg(cfg.targetDir));
+        abortStart(kErrReadCapacityFailed(), kErrReadCapacity().arg(cfg.targetDir));
         return;
     }
     if (qint64(free) < plan.totalBytes + FioConfig::reserveBytes(total)) {
-        abortStart(kErrNoSpace,
-                   kErrPerfNoSpace.arg(formatBytes(free),
+        abortStart(kErrNoSpace(),
+                   kErrPerfNoSpace().arg(formatBytes(free),
                                        FioConfig::perfSizeText(plan.totalBytes)));
         return;
     }
@@ -3293,32 +3376,32 @@ void MainWindow::startPerfRun()
     const QString fsName = queryFileSystem(cfg.targetDir);
     if (isFatFileSystem(fsName)
         && plan.totalBytes >= qint64(4) * 1024 * 1024 * 1024) {   // 4 GiB 本身也放不下
-        abortStart(kMsgFat32TooBigTitle,
-                   kErrFat32TooBig.arg(QDir::toNativeSeparators(cfg.targetDir),
+        abortStart(kMsgFat32TooBigTitle(),
+                   kErrFat32TooBig().arg(QDir::toNativeSeparators(cfg.targetDir),
                                        FioConfig::perfSizeText(plan.totalBytes)));
         return;
     }
 
-    const QString what = kLogPreallocating.arg(plan.fileCount)
+    const QString what = kLogPreallocating().arg(plan.fileCount)
                              .arg(formatBytes(quint64(plan.fileSize)));
     logEvent(what);
     statusBar()->showMessage(what);
 
     QString error;
     if (!confirmOverwriteTestFiles()) {
-        logEvent(kLogOverwriteCancelled, true);
-        abortStart(kErrBadParams, kLogOverwriteCancelled);
+        logEvent(kLogOverwriteCancelled(), true);
+        abortStart(kErrBadParams(), kLogOverwriteCancelled());
         return;
     }
     if (!clearTestFiles(folder, &error) || !ensureTestFolder(folder, &error)) {
-        abortStart(kErrCleanupOldFailed, error, true);
+        abortStart(kErrCleanupOldFailed(), error, true);
         return;
     }
     // 同上：性能模式也要先确认 direct=1 在这个文件系统上能用
     // （后面预建文件要花几十秒，别等建完了才在 fio 那一步失败）。
     if (!supportsDirectIo(folder, &error)) {
-        abortStart(kMsgNoDirectIoTitle,
-                   kErrNoDirectIo.arg(QDir::toNativeSeparators(folder), error), true);
+        abortStart(kMsgNoDirectIoTitle(),
+                   kErrNoDirectIo().arg(QDir::toNativeSeparators(folder), error), true);
         return;
     }
 
@@ -3374,7 +3457,7 @@ void MainWindow::startNextPerfItem()
 
     m_phase = Phase::Reading;   // 正在跑一项测试
     updateStateLabel();
-    logEvent(kLogPerfItemStart.arg(FioConfig::perfItemName(item))
+    logEvent(kLogPerfItemStart().arg(FioConfig::perfItemName(item))
                  .arg(FioConfig::perfRuntimeSeconds()));
 
     startPerfPass();
@@ -3402,17 +3485,17 @@ void MainWindow::startPerfPass()
     m_chart->setDirections(m_plotRead, m_plotWrite);
     updateStateLabel();
     // 状态栏跟着走到当前这一趟，否则会一直停在预建文件那句"准备中"
-    statusBar()->showMessage(kStatusPerfPass.arg(FioConfig::perfItemName(item),
-                                                 writePass ? kPhaseWrite : kPhaseRead));
-    logEvent(kLogPerfPassStart.arg(FioConfig::perfItemName(item),
-                                   writePass ? kPhaseWrite : kPhaseRead)
+    statusBar()->showMessage(kStatusPerfPass().arg(FioConfig::perfItemName(item),
+                                                 writePass ? kPhaseWrite() : kPhaseRead()));
+    logEvent(kLogPerfPassStart().arg(FioConfig::perfItemName(item),
+                                   writePass ? kPhaseWrite() : kPhaseRead())
                  .arg(FioConfig::perfRuntimeSeconds()));
 
     const QString jobText =
         cfg.perfJobFileText(item, writePass, m_perfFileCount, m_perfFileSize);
-    recordOutput(kPhaseHeadFmt.arg(
+    recordOutput(kPhaseHeadFmt().arg(
         QStringLiteral("%1 / %2").arg(FioConfig::perfItemName(item),
-                                      writePass ? kPhaseWrite : kPhaseRead)));
+                                      writePass ? kPhaseWrite() : kPhaseRead())));
     for (const QString &line : jobText.split(QLatin1Char('\n')))
         recordOutput(line);
 
@@ -3420,13 +3503,13 @@ void MainWindow::startPerfPass()
     const QString jobPath = FioRunner::writeJobFile(
         jobText, QStringLiteral("ml_disktest-perf.fio"), &error);
     if (jobPath.isEmpty()) {
-        abortStart(kErrCreateJobFailed, error, true);
+        abortStart(kErrCreateJobFailed(), error, true);
         return;
     }
 
     if (!m_runner->startJob(cfg.testFolder(), jobPath, cfg.commonExtraArguments(),
                             JobKind::Perf, &error)) {
-        abortStart(kErrStartReadPhase, error, true);
+        abortStart(kErrStartReadPhase(), error, true);
         return;
     }
 }
@@ -3450,8 +3533,8 @@ void MainWindow::preallocNextFile()
     if (m_preallocIndex >= m_preallocCount) {
         m_preallocTimer->stop();
         updateDiskBarFor(cfg.targetDir);
-        logEvent(kLogPreallocated.arg(formatBytes(quint64(m_preallocSize * m_preallocCount))));
-        logEvent(kLogPerfAllPlanned.arg(m_perfQueue.size())
+        logEvent(kLogPreallocated().arg(formatBytes(quint64(m_preallocSize * m_preallocCount))));
+        logEvent(kLogPerfAllPlanned().arg(m_perfQueue.size())
                      .arg(m_perfQueue.size() * FioConfig::perfPassWallSeconds() * 2));
         startNextPerfItem();
         return;
@@ -3476,7 +3559,7 @@ void MainWindow::preallocNextFile()
             delete m_preallocFile;
             m_preallocFile = nullptr;
             m_preallocTimer->stop();
-            abortStart(kErrPreallocFailed, detail, true);
+            abortStart(kErrPreallocFailed(), detail, true);
             return;
         }
         m_preallocOffset = 0;
@@ -3492,7 +3575,7 @@ void MainWindow::preallocNextFile()
         delete m_preallocFile;
         m_preallocFile = nullptr;
         m_preallocTimer->stop();
-        abortStart(kErrPreallocFailed, detail, true);
+        abortStart(kErrPreallocFailed(), detail, true);
         return;
     }
     m_preallocOffset += chunk;
@@ -3513,9 +3596,9 @@ void MainWindow::preallocNextFile()
         m_preallocFile = nullptr;
 
         ++m_preallocIndex;
-        statusBar()->showMessage(kLogPreparingFiles.arg(m_preallocIndex).arg(m_preallocCount));
+        statusBar()->showMessage(kLogPreparingFiles().arg(m_preallocIndex).arg(m_preallocCount));
         if (m_preallocIndex % 4 == 0 || m_preallocIndex == m_preallocCount)
-            logEvent(kLogPreparingFiles.arg(m_preallocIndex).arg(m_preallocCount));
+            logEvent(kLogPreparingFiles().arg(m_preallocIndex).arg(m_preallocCount));
     }
 }
 
@@ -3524,12 +3607,12 @@ void MainWindow::deletePerfFiles()
     const QString folder = m_activeConfig.testFolder();
     QString error;
     if (!clearTestFiles(folder, &error)) {
-        logEvent(kLogStoppedWriteCleanFailed.arg(error), true);
+        logEvent(kLogStoppedWriteCleanFailed().arg(error), true);
         return;
     }
     // 文件删完再把 ml_disktest 目录本身也删掉，别在盘上留个空壳
     QDir().rmdir(folder);
-    logEvent(kLogPerfCleanup);
+    logEvent(kLogPerfCleanup());
 }
 
 void MainWindow::recordPerfTrace(double x, double readMiBs, double writeMiBs)
@@ -3552,7 +3635,7 @@ void MainWindow::showPerfItemTrace(int itemIndex)
     const QVector<QPointF> &readTrace = m_perfReadTrace[itemIndex];
     const QVector<QPointF> &writeTrace = m_perfWriteTrace[itemIndex];
     if (readTrace.isEmpty() && writeTrace.isEmpty()) {
-        QMessageBox::information(this, kAppName, kTraceNoData);
+        QMessageBox::information(this, kAppName(), kTraceNoData());
         return;
     }
 
@@ -3568,15 +3651,15 @@ void MainWindow::showPerfItemTrace(int itemIndex)
                                m_densityLowRadio->isChecked() ? SpeedChart::Density::Low
                                                               : SpeedChart::Density::High);
 
-    statusBar()->showMessage(kTraceShownTip.arg(FioConfig::perfItemName(item)));
+    statusBar()->showMessage(kTraceShownTip().arg(FioConfig::perfItemName(item)));
 }
 
 void MainWindow::finishPerfRun()
 {
     if (m_stopRequested)
-        logEvent(kLogOneRoundDone);
+        logEvent(kLogOneRoundDone());
     else
-        logEvent(kLogPerfAllDone.arg(m_perfQueue.size()));
+        logEvent(kLogPerfAllDone().arg(m_perfQueue.size()));
 
     // 需求：性能测试结束后默认删除测试文件（终止时上面已经删过，这里只在正常结束时删）
     if (!m_stopRequested)
@@ -3603,7 +3686,7 @@ void MainWindow::finishWholeTest()
     }
 
     // 状态栏落到真实状态，否则会一直挂着中途某一条旧消息（比如"准备中"）
-    statusBar()->showMessage(m_stopRequested ? kStatusStoppedFinal : kStatusFinishedFinal);
+    statusBar()->showMessage(m_stopRequested ? kStatusStoppedFinal() : kStatusFinishedFinal());
 
     // 测试结束了就没有"实时速度"了：清掉最后残留的那个读数，
     // 只留平均值（平均读取 / 平均写入在阶段结束时已经定格）。
@@ -3624,42 +3707,42 @@ void MainWindow::finishWholeTest()
                                     });
 
     QStringList summary;
-    summary << kReportTestEnd;
-    summary << kReportTestPartition.arg(QDir::toNativeSeparators(m_activeConfig.targetDir));
-    summary << kReportRwMode.arg(m_activeConfig.modeText());
+    summary << kReportTestEnd();
+    summary << kReportTestPartition().arg(QDir::toNativeSeparators(m_activeConfig.targetDir));
+    summary << kReportRwMode().arg(m_activeConfig.modeText());
 
     bool allClean = true;
     for (const PhaseOutcome &outcome : m_outcomes) {
         const FioResult &r = outcome.result;
         const RunStats &s = outcome.stats;
-        summary << kPhaseHeadFmt.arg(m_totalRounds > 1
-                                         ? kRoundTagFmt.arg(outcome.round)
+        summary << kPhaseHeadFmt().arg(m_totalRounds > 1
+                                         ? kRoundTagFmt().arg(outcome.round)
                                                + jobKindText(r.kind)
                                          : jobKindText(r.kind));
-        summary << kReportFioExitCode.arg(r.exitCode);
-        summary << kReportSampleWindow
+        summary << kReportFioExitCode().arg(r.exitCode);
+        summary << kReportSampleWindow()
                        .arg(s.count).arg(r.elapsedSeconds, 0, 'f', 1);
         if (s.count > 0) {
-            summary << kReportReadAvgMinMax
+            summary << kReportReadAvgMinMax()
                            .arg(formatSpeed(s.readAvg), formatSpeed(s.readMin),
                                 formatSpeed(s.readMax));
-            summary << kReportWriteAvgMinMax
+            summary << kReportWriteAvgMinMax()
                            .arg(formatSpeed(s.writeAvg), formatSpeed(s.writeMin),
                                 formatSpeed(s.writeMax));
         } else {
-            summary << kReportNoSamples;
+            summary << kReportNoSamples();
         }
         for (const QString &warning : r.warnings)
-            summary << kReportWarning.arg(warning);
+            summary << kReportWarning().arg(warning);
         for (int i = 0; i < r.jobErrors.size(); ++i)
             summary << QStringLiteral("  job %1 err = %2").arg(i + 1).arg(r.jobErrors.at(i));
         allClean = allClean && !r.cancelled && r.isClean();
     }
 
     const bool bad = anyBad;
-    summary << (bad ? kReportVerdictBad
-                    : (allClean ? kReportVerdictOk
-                                : kReportVerdictStopped));
+    summary << (bad ? kReportVerdictBad()
+                    : (allClean ? kReportVerdictOk()
+                                : kReportVerdictStopped()));
     summary << QStringLiteral("================================");
 
     for (const QString &line : summary)
@@ -3670,9 +3753,9 @@ void MainWindow::finishWholeTest()
     if (m_selfTestMode && !m_selfTestSaveData.isEmpty()) {
         QString saveError;
         if (saveRunDataTo(m_selfTestSaveData, &saveError))
-            recordOutput(kSelfTestDataSaved.arg(m_selfTestSaveData));
+            recordOutput(kSelfTestDataSaved().arg(m_selfTestSaveData));
         else
-            recordOutput(kSelfTestSaveFailed.arg(saveError));
+            recordOutput(kSelfTestSaveFailed().arg(saveError));
     }
 
     if (m_selfTestMode)
@@ -3685,20 +3768,20 @@ void MainWindow::updateStateLabel()
     QString color;
     switch (m_phase) {
     case Phase::Preparing:
-        text = kStatePreparing;
+        text = kStatePreparing();
         color = QStringLiteral("#c87f0a");
         break;
     case Phase::Writing:
-        text = kStateWriting;
+        text = kStateWriting();
         color = QStringLiteral("#1e46dc");
         break;
     case Phase::Reading:
-        text = kStateReading;
+        text = kStateReading();
         color = QStringLiteral("#dc1e1e");
         break;
     case Phase::Idle:
     default:
-        text = kStateStopped;
+        text = kStateStopped();
         color = QStringLiteral("#3c3c3c");
         break;
     }
@@ -3735,9 +3818,9 @@ void MainWindow::logEvent(const QString &text, bool isProblem)
 
 void MainWindow::reportProblem(const QString &title, const QString &text, bool critical)
 {
-    m_lastError = kTextTitleColon.arg(title, text);
-    logEvent(kLogErrorPrefix.arg(m_lastError), true);
-    recordOutput(kReportError.arg(m_lastError));
+    m_lastError = kTextTitleColon().arg(title, text);
+    logEvent(kLogErrorPrefix().arg(m_lastError), true);
+    recordOutput(kReportError().arg(m_lastError));
     if (m_selfTestMode)
         return;
     if (critical)
@@ -3870,7 +3953,7 @@ void MainWindow::runSelfTest()
         QString loadError;
         const bool ok = loadRunDataFrom(m_selfTestLoadData, &loadError);
         if (!ok)
-            recordOutput(kSelfTestLoadFailed.arg(loadError));
+            recordOutput(kSelfTestLoadFailed().arg(loadError));
         m_loadedDataFrom = ok ? m_selfTestLoadData : QString();
         m_loadedDataOk = ok;
         m_lastError = ok ? QString() : loadError;
@@ -3892,7 +3975,7 @@ void MainWindow::runSelfTest()
                         QStringLiteral("result-window.png")), "PNG");
             });
         } else {
-            recordOutput(kSelfTestResultWindowFailed);
+            recordOutput(kSelfTestResultWindowFailed());
         }
 
         QTimer::singleShot(400, this, &MainWindow::writeSelfTestReport);
@@ -3910,19 +3993,19 @@ void MainWindow::runSelfTest()
     updateReadAvailability();
 
     if (m_targetDir.isEmpty()) {
-        m_lastError = kSelfTestTargetNotFound
-                          .arg(m_selfTestTarget.isEmpty() ? kTextUnspecified
+        m_lastError = kSelfTestTargetNotFound()
+                          .arg(m_selfTestTarget.isEmpty() ? kTextUnspecified()
                                                           : m_selfTestTarget);
-        recordOutput(kSelfTestPrefix + m_lastError);
+        recordOutput(kSelfTestPrefix() + m_lastError);
         for (const QString &line : m_diskSummary)
-            recordOutput(kSelfTestEnumerated + line);
-        logEvent(kLogErrorPrefix.arg(m_lastError), true);
+            recordOutput(kSelfTestEnumerated() + line);
+        logEvent(kLogErrorPrefix().arg(m_lastError), true);
         // 出报告再退出：早期中止如果什么都不留，自动化里根本看不出发生了什么
         writeSelfTestReport();
         return;
     }
 
-    recordOutput(kSelfTestBegin);
+    recordOutput(kSelfTestBegin());
     onStart();
     // onStart() 会把告警条清零，强制显示要放在它**之后**
     applyDebugVerifyBanner();
@@ -3936,9 +4019,9 @@ void MainWindow::applyDebugVerifyBanner()
         return;
     m_verifyFailures = 3;
     updateVerifyBanner();
-    logEvent(kLogDebugBannerForced, true);
-    recordOutput(kLogDebugBannerForced);
-    setWindowTitle(windowTitle() + kDebugBannerTitleSuffix);
+    logEvent(kLogDebugBannerForced(), true);
+    recordOutput(kLogDebugBannerForced());
+    setWindowTitle(windowTitle() + kDebugBannerTitleSuffix());
 }
 
 void MainWindow::writeSelfTestReport()
@@ -4084,16 +4167,16 @@ void MainWindow::writeSelfTestReport()
                             && plan.totalBytes <= qint64(probe.free)
                             && plan.fileCount * plan.fileSize == plan.totalBytes;
             planGuard = planGuard && ok;
-            planLines << kSelfTestPlanLine
+            planLines << kSelfTestPlanLine()
                              .arg(formatBytes(probe.free))
                              .arg(plan.fileCount)
                              .arg(formatBytes(quint64(plan.fileSize)),
                                   formatBytes(quint64(plan.totalBytes)))
-                             .arg(ok ? QStringLiteral("OK") : kSelfTestViolation);
+                             .arg(ok ? QStringLiteral("OK") : kSelfTestViolation());
         } else {
             // 空间不足时给出无效计划是正确行为
             planGuard = planGuard && (probe.free < 300ULL * 1024 * 1024);
-            planLines << kSelfTestPlanInvalid.arg(formatBytes(probe.free));
+            planLines << kSelfTestPlanInvalid().arg(formatBytes(probe.free));
         }
     }
 
@@ -4140,8 +4223,8 @@ void MainWindow::writeSelfTestReport()
     QStringList stepLines;
     for (const auto &check : stepChecks) {
         stepGuard = stepGuard && check.ok;
-        stepLines << kSelfTestStepLine.arg(check.note,
-                                           check.ok ? QStringLiteral("OK") : kSelfTestViolation);
+        stepLines << kSelfTestStepLine().arg(check.note,
+                                           check.ok ? QStringLiteral("OK") : kSelfTestViolation());
     }
 
     bool noProblems = true;
@@ -4194,134 +4277,134 @@ void MainWindow::writeSelfTestReport()
     {
         QTextStream out(&text);
 
-        out << kReportTitle;
-        out << kReportQtVersion << qVersion() << "\n";
-        out << kReportQpaPlatform << QApplication::platformName() << "\n";
-        out << kReportFioVersion
-            << (m_fioVersionLabel->text().isEmpty() ? kTextUnknown : m_fioVersionLabel->text()) << "\n";
-        out << kReportTargetPartition << m_activeConfig.targetDir << "\n";
-        out << kReportTestFolder << QDir::toNativeSeparators(m_activeConfig.testFolder()) << "\n";
+        out << kReportTitle();
+        out << kReportQtVersion() << qVersion() << "\n";
+        out << kReportQpaPlatform() << QApplication::platformName() << "\n";
+        out << kReportFioVersion()
+            << (m_fioVersionLabel->text().isEmpty() ? kTextUnknown() : m_fioVersionLabel->text()) << "\n";
+        out << kReportTargetPartition() << m_activeConfig.targetDir << "\n";
+        out << kReportTestFolder() << QDir::toNativeSeparators(m_activeConfig.testFolder()) << "\n";
         // 这一行写**界面当前的配置**，不写 m_activeConfig：
         // 自检在"还没开跑就中止"那条路径上（比如没选目标分区）也会出报告，
         // 那时 m_activeConfig 还是默认构造的空壳，写出来是一组假参数
         // （实测过：界面明明是 iodepth=8，报告却写 16）。
         // 真跑起来之后 configFromUi() 与 m_activeConfig 是同一份内容。
-        out << kReportTestConfig << configFromUi().describe() << "\n";
-        out << kReportRounds << m_totalRounds << "\n";
+        out << kReportTestConfig() << configFromUi().describe() << "\n";
+        out << kReportRounds() << m_totalRounds << "\n";
         if (!m_loadedDataFrom.isEmpty())
-            out << kReportDataSource << QDir::toNativeSeparators(m_loadedDataFrom)
-                << kReportNotRealtime;
+            out << kReportDataSource() << QDir::toNativeSeparators(m_loadedDataFrom)
+                << kReportNotRealtime();
         if (!m_lastError.isEmpty())
-            out << kReportStartupError << m_lastError << "\n";
+            out << kReportStartupError() << m_lastError << "\n";
         if (!m_diskSummary.isEmpty()) {
             // 这里列的是"磁盘 + 它下面每个文件系统"两组行，
             // 报个数只会让人以为那是磁盘数，所以只说清了列的是什么。
-            out << kReportVolumeList << kReportDiskListNote;
+            out << kReportVolumeList() << kReportDiskListNote();
             for (const QString &line : m_diskSummary)
                 out << "    " << line << "\n";
         }
         if (!m_ignoredVolumes.isEmpty()) {
             // 被规则挡掉的卷也要写出来：否则用户只会看到"我的盘不见了"
-            out << kReportIgnoredList << m_ignoredVolumes.join(QStringLiteral("  ")) << "\n";
+            out << kReportIgnoredList() << m_ignoredVolumes.join(QStringLiteral("  ")) << "\n";
         }
-        out << kReportPhaseList;
+        out << kReportPhaseList();
         QStringList kinds;
-        if (m_activeConfig.doWrite) kinds << kPhaseNameWrite;
-        if (m_activeConfig.doRead) kinds << kPhaseNameRead;
-        out << kinds.join(kTextArrow) << "\n";
+        if (m_activeConfig.doWrite) kinds << kPhaseNameWrite();
+        if (m_activeConfig.doRead) kinds << kPhaseNameRead();
+        out << kinds.join(kTextArrow()) << "\n";
         if (m_selfTestFillLimit > 0)
-            out << kReportFillLimit << m_selfTestFillLimit << " MiB\n";
+            out << kReportFillLimit() << m_selfTestFillLimit << " MiB\n";
         if (m_activePlan.isValid()) {
-            out << kReportFilePlanHead << m_activePlan.fileCount << kReportSuffixTimes
+            out << kReportFilePlanHead() << m_activePlan.fileCount << kReportSuffixTimes()
                 << formatBytes(quint64(m_activePlan.fileSize)) << " = "
                 << formatBytes(quint64(m_activePlan.totalBytes)) << "\n";
         }
-        out << kReportExistingFiles
-            << scanTestFiles(m_activeConfig.testFolder()).count << kReportSuffixCount;
+        out << kReportExistingFiles()
+            << scanTestFiles(m_activeConfig.testFolder()).count << kReportSuffixCount();
         for (const PhaseOutcome &outcome : m_outcomes) {
             const FioResult &r = outcome.result;
             const RunStats &s = outcome.stats;
-            out << kPhaseHeadFmt.arg(m_totalRounds > 1
-                                         ? kRoundTagFmt.arg(outcome.round) + jobKindText(r.kind)
+            out << kPhaseHeadFmt().arg(m_totalRounds > 1
+                                         ? kRoundTagFmt().arg(outcome.round) + jobKindText(r.kind)
                                          : jobKindText(r.kind)) << "\n";
-            out << kReportPhaseExitCode << r.exitCode << (r.cancelled ? kReportCancelledTag : "") << "\n";
-            out << kReportPhaseSamples << s.count << kReportWindowPrefix
-                << QString::number(r.elapsedSeconds, 'f', 1) << kReportSuffixSeconds;
-            out << kReportReadMinAvgMax
+            out << kReportPhaseExitCode() << r.exitCode << (r.cancelled ? kReportCancelledTag() : "") << "\n";
+            out << kReportPhaseSamples() << s.count << kReportWindowPrefix()
+                << QString::number(r.elapsedSeconds, 'f', 1) << kReportSuffixSeconds();
+            out << kReportReadMinAvgMax()
                        .arg(s.readMin, 0, 'f', 2).arg(s.readAvg, 0, 'f', 2).arg(s.readMax, 0, 'f', 2);
-            out << kReportWriteMinAvgMax
+            out << kReportWriteMinAvgMax()
                        .arg(s.writeMin, 0, 'f', 2).arg(s.writeAvg, 0, 'f', 2).arg(s.writeMax, 0, 'f', 2);
-            out << kReportSummaryRead
-                << (r.hasRead ? formatSpeed(r.readMiBs) + "  " + r.readDetail : kTextNone) << "\n";
-            out << kReportSummaryWrite
-                << (r.hasWrite ? formatSpeed(r.writeMiBs) + "  " + r.writeDetail : kTextNone) << "\n";
+            out << kReportSummaryRead()
+                << (r.hasRead ? formatSpeed(r.readMiBs) + "  " + r.readDetail : kTextNone()) << "\n";
+            out << kReportSummaryWrite()
+                << (r.hasWrite ? formatSpeed(r.writeMiBs) + "  " + r.writeDetail : kTextNone()) << "\n";
             out << "  job err           :";
             for (int err : r.jobErrors)
                 out << " " << err;
             out << "\n";
-            out << kReportPhaseWarnings << r.warnings.size() << "\n";
+            out << kReportPhaseWarnings() << r.warnings.size() << "\n";
             for (const QString &warning : r.warnings)
                 out << "    - " << warning << "\n";
             // 校验失败的块数是这块盘好坏的**结论性证据**，必须出现在报告里
-            out << kReportVerifyCount << r.verifyFailures << "\n";
+            out << kReportVerifyCount() << r.verifyFailures << "\n";
             if (!r.firstVerifyError.isEmpty())
-                out << kReportVerifyFirst << r.firstVerifyError << "\n";
+                out << kReportVerifyFirst() << r.firstVerifyError << "\n";
             // 逐处列出坏在哪。只报第一条会让人以为"只有那一处坏"，
             // 实际上一块坏盘的失败点分散在很多偏移量上——报告要能看出这一点。
             for (const QString &line : r.verifyErrorLines)
-                out << kReportVerifyWhere << line << "\n";
+                out << kReportVerifyWhere() << line << "\n";
             const int shown = r.verifyErrorLines.size();
             if (r.verifyFailures > shown)
-                out << kReportVerifyTruncated.arg(shown).arg(r.verifyFailures) << "\n";
+                out << kReportVerifyTruncated().arg(shown).arg(r.verifyFailures) << "\n";
         }
-        out << kReportPlotStyle
-            << (m_chart->plotStyle() == SpeedChart::PlotStyle::Scatter ? kPlotScatter : kPlotLine) << "\n";
-        out << kReportSamplePoints << m_chart->sampleCount()
-            << kReportLineSeries << m_chart->linePointCount()
-            << kReportScatterSeries << m_chart->scatterPointCount() << "\n";
-        out << kReportSkippedFirst << m_skippedFirstSamples
-            << kReportSkippedFirstNote;
+        out << kReportPlotStyle()
+            << (m_chart->plotStyle() == SpeedChart::PlotStyle::Scatter ? kPlotScatter() : kPlotLine()) << "\n";
+        out << kReportSamplePoints() << m_chart->sampleCount()
+            << kReportLineSeries() << m_chart->linePointCount()
+            << kReportScatterSeries() << m_chart->scatterPointCount() << "\n";
+        out << kReportSkippedFirst() << m_skippedFirstSamples
+            << kReportSkippedFirstNote();
 
         // 报告里要写**图表实际用的轴**，不能按 m_activeConfig 判：
         // 自检加载一份性能 CSV 时配置还是"可靠性"，照配置写就会出现
         // "横轴 0~10 秒"却标成 GiB 这种自相矛盾的行。
         if (m_chart->axisMode() == SpeedChart::AxisMode::Time) {
-            out << kReportAxisTimeFmt.arg(QString::number(m_chart->axisMax(), 'f', 1))
+            out << kReportAxisTimeFmt().arg(QString::number(m_chart->axisMax(), 'f', 1))
                                        .arg(QString::number(m_chart->firstX(), 'f', 4))
                                        .arg(QString::number(m_chart->lastX(), 'f', 4));
         } else {
-            out << kReportAxisHead << formatBytes(quint64(m_axisByteTotal))
-                << kReportAxisMid << QString::number(m_chart->firstX(), 'f', 4)
-                << kReportAxisLastX << QString::number(m_chart->lastX(), 'f', 4) << " GiB\n";
+            out << kReportAxisHead() << formatBytes(quint64(m_axisByteTotal))
+                << kReportAxisMid() << QString::number(m_chart->firstX(), 'f', 4)
+                << kReportAxisLastX() << QString::number(m_chart->lastX(), 'f', 4) << " GiB\n";
         }
 
-        out << kReportCardCurrentRead << m_readValueLabel->text()
-            << kReportCardCurrentWrite << m_writeValueLabel->text()
-            << kReportCardAvgRead << m_avgReadLabel->text()
-            << kReportCardAvgWrite << m_avgWriteLabel->text()
-            << kReportCardElapsed << m_elapsedLabel->text() << "\n";
-        out << kReportEndChecks.arg(m_writeCheck->isChecked() ? 1 : 0)
+        out << kReportCardCurrentRead() << m_readValueLabel->text()
+            << kReportCardCurrentWrite() << m_writeValueLabel->text()
+            << kReportCardAvgRead() << m_avgReadLabel->text()
+            << kReportCardAvgWrite() << m_avgWriteLabel->text()
+            << kReportCardElapsed() << m_elapsedLabel->text() << "\n";
+        out << kReportEndChecks().arg(m_writeCheck->isChecked() ? 1 : 0)
                                .arg(m_readCheck->isChecked() ? 1 : 0)
                                .arg(m_verifyCheck->isChecked() ? 1 : 0);
-        out << kReportStateEnd << m_stateLabel->text()
-            << kReportStateObserved
-            << (m_observedStates.isEmpty() ? kTextNotObserved
-                                           : m_observedStates.join(kTextArrow)) << "\n";
-        out << kReportGuardRawDevice << (rawDeviceGuard ? "PASS" : "FAIL") << "\n";
-        out << kReportGuardRawReject << (rawRejectGuard ? "PASS" : "FAIL")
+        out << kReportStateEnd() << m_stateLabel->text()
+            << kReportStateObserved()
+            << (m_observedStates.isEmpty() ? kTextNotObserved()
+                                           : m_observedStates.join(kTextArrow())) << "\n";
+        out << kReportGuardRawDevice() << (rawDeviceGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardRawReject() << (rawRejectGuard ? "PASS" : "FAIL")
             << QStringLiteral("（validate() 会拒掉 \\\\.\\PhysicalDrive0 与 /dev/sdX）") << "\n";
-        out << kReportGuardSyncEngine << (engineGuard ? "PASS" : "FAIL") << "\n";
-        out << kReportGuardVerifyVerdict << (verifyVerdictGuard ? "PASS" : "FAIL")
+        out << kReportGuardSyncEngine() << (engineGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardVerifyVerdict() << (verifyVerdictGuard ? "PASS" : "FAIL")
             << QStringLiteral("（校验失败 >0 时 isClean() 必须是 false）") << "\n";
-        out << kReportGuardTestFileName << (testFileNameGuard ? "PASS" : "FAIL")
+        out << kReportGuardTestFileName() << (testFileNameGuard ? "PASS" : "FAIL")
             << QStringLiteral("（只认 testfile_<数字>，不碰别的同名文件）") << "\n";
-        out << kReportGuardWindowIcon << (iconGuard ? "PASS" : "FAIL") << "\n";
-        out << kReportGuardAutoStep << (stepGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardWindowIcon() << (iconGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardAutoStep() << (stepGuard ? "PASS" : "FAIL") << "\n";
         for (const QString &line : stepLines)
             out << line << "\n";
-        out << kReportGuardExclusive << (m_exclusiveGuardOk ? "PASS" : "FAIL")
-            << kReportExclusiveNote;
-        out << kReportGuardFilePlan << (planGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportGuardExclusive() << (m_exclusiveGuardOk ? "PASS" : "FAIL")
+            << kReportExclusiveNote();
+        out << kReportGuardFilePlan() << (planGuard ? "PASS" : "FAIL") << "\n";
         for (const QString &line : planLines)
             out << line << "\n";
 
@@ -4352,8 +4435,8 @@ void MainWindow::writeSelfTestReport()
                 && def.perfDataBytes == qint64(1024) * 1024 * 1024
                 && def.perfItemChecked[0] && def.perfItemChecked[1]
                 && def.perfItemChecked[2] && def.perfItemChecked[3];
-            out << kReportGuardDefaults << (defaultsOk ? "PASS" : "FAIL")
-                << kReportDefaultsDetail.arg(def.iodepth)
+            out << kReportGuardDefaults() << (defaultsOk ? "PASS" : "FAIL")
+                << kReportDefaultsDetail().arg(def.iodepth)
                                          .arg(def.perfDataBytes / (1024 * 1024))
                 << "\n";
         }
@@ -4379,22 +4462,22 @@ void MainWindow::writeSelfTestReport()
                 && !fioLooksBundled(QDir::cleanPath(
                        appDir + QStringLiteral("/../fio/") + fioExecutableName()));
 
-            out << kReportGuardFioLookup << ((bundledOk && noScanOk && labelOk) ? "PASS" : "FAIL")
-                << kReportFioLookupDetail
-                       .arg(locateFioExecutable().isEmpty() ? kTextNone
+            out << kReportGuardFioLookup() << ((bundledOk && noScanOk && labelOk) ? "PASS" : "FAIL")
+                << kReportFioLookupDetail()
+                       .arg(locateFioExecutable().isEmpty() ? kTextNone()
                                                             : locateFioExecutable())
                 << "\n";
         }
 
-        out << kReportFilesPresent << (fileGuard ? "PASS" : "FAIL") << "\n";
+        out << kReportFilesPresent() << (fileGuard ? "PASS" : "FAIL") << "\n";
 
         if (loading) {
-            out << kReportGuardLoadedData << (dataGuard ? "PASS" : "FAIL")
-                << kTextParenOpen << m_chart->sampleCount() << kReportLoadedDataNote;
+            out << kReportGuardLoadedData() << (dataGuard ? "PASS" : "FAIL")
+                << kTextParenOpen() << m_chart->sampleCount() << kReportLoadedDataNote();
             // 用户实际走的是「文件 → 打开测试结果…」那条路（独立窗口），
             // 所以自检也要把这条路径跑一遍，不能只验证"灌进主窗口"。
-            out << kReportGuardResultWindow << (m_resultWindowOk ? "PASS" : "FAIL")
-                << kReportResultWindowItem.arg(m_resultWindowItem) << "\n";
+            out << kReportGuardResultWindow() << (m_resultWindowOk ? "PASS" : "FAIL")
+                << kReportResultWindowItem().arg(m_resultWindowItem) << "\n";
 
             // 模式判别与性能四项取值：必须在报告里能断言，
             // 光靠截图肉眼看数字不算证据。
@@ -4412,9 +4495,9 @@ void MainWindow::writeSelfTestReport()
                     perf ? (present.size() == 4)
                          : (present.size() <= 1
                             && (present.isEmpty() || present.first() == 0));
-                out << kReportLoadedModeGuard << (modeOk ? "PASS" : "FAIL")
-                    << (perf ? kModeNamePerformance : kModeNameReliability)
-                    << kReportLoadedItemsFmt.arg(present.size()) << "\n";
+                out << kReportLoadedModeGuard() << (modeOk ? "PASS" : "FAIL")
+                    << (perf ? kModeNamePerformance() : kModeNameReliability())
+                    << kReportLoadedItemsFmt().arg(present.size()) << "\n";
 
                 if (perf && present.size() == 4) {
                     const QVector<RunData::Trace> traces = m_loadedRunData.perfTraces();
@@ -4422,7 +4505,7 @@ void MainWindow::writeSelfTestReport()
                     QStringList values;
                     bool allPresent = true;
                     for (int i = 0; i < traces.size() && i < allItems.size(); ++i) {
-                        values << kResultPerfItemFmt.arg(
+                        values << kResultPerfItemFmt().arg(
                             FioConfig::perfItemName(allItems.at(i)),
                             formatSpeed(traces.at(i).readValue),
                             formatSpeed(traces.at(i).writeValue));
@@ -4430,19 +4513,19 @@ void MainWindow::writeSelfTestReport()
                                      && traces.at(i).readValue >= 0.0
                                      && traces.at(i).writeValue >= 0.0;
                     }
-                    out << kReportGuardPerfItems << (allPresent ? "PASS" : "FAIL") << "\n";
+                    out << kReportGuardPerfItems() << (allPresent ? "PASS" : "FAIL") << "\n";
                     for (const QString &line : values)
                         out << "    " << line << "\n";
                 }
             }
         }
-        out << kReportGuardProblems << (noProblems ? kReportNoProblems : "FAIL") << "\n";
-        out << kReportRawOutput << (rawSaved ? rawPath : kTextSaveFailed) << "\n";
-        out << kReportCsvOutput << (csvSaved ? csvPath : kTextSaveFailed) << "\n";
-        out << kReportChartPng << (chartSaved ? pngPath : kTextSaveFailed) << "\n";
-        out << kReportWindowPng << (windowSaved ? windowPngPath : kTextSaveFailed) << "\n";
-        out << kReportVerdict << (pass ? "PASS" : "FAIL")
-            << (cancelled ? kReportStoppedTag : "") << "\n";
+        out << kReportGuardProblems() << (noProblems ? kReportNoProblems() : "FAIL") << "\n";
+        out << kReportRawOutput() << (rawSaved ? rawPath : kTextSaveFailed()) << "\n";
+        out << kReportCsvOutput() << (csvSaved ? csvPath : kTextSaveFailed()) << "\n";
+        out << kReportChartPng() << (chartSaved ? pngPath : kTextSaveFailed()) << "\n";
+        out << kReportWindowPng() << (windowSaved ? windowPngPath : kTextSaveFailed()) << "\n";
+        out << kReportVerdict() << (pass ? "PASS" : "FAIL")
+            << (cancelled ? kReportStoppedTag() : "") << "\n";
         out << "=====================================================================\n";
         out.flush();
     }   // ← QTextStream 到此结束，text 之后还能安全使用

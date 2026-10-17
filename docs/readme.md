@@ -842,7 +842,7 @@ build.bat installer           全量重建 + package + 编译安装包
 ```
 
 ```
-build\installer\disktest-3.0.6-setup.exe     约 18 MB
+build\installer\disktest-3.0.7-setup.exe     约 18 MB
 build\dist\                                  安装包的内容就是它，逐文件一致
 ```
 
@@ -857,7 +857,7 @@ winget install --id JRSoftware.InnoSetup --exact
 也可以手工编译（注意 `/D` 要写在脚本路径前面）：
 
 ```bat
-"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=3.0.6 installer\disktest.iss
+"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=3.0.7 installer\disktest.iss
 ```
 
 安装脚本 `installer\disktest.iss` 做的事：
@@ -867,25 +867,58 @@ winget install --id JRSoftware.InnoSetup --exact
 | `build\dist\*` 原样装进 `{app}`（只排除 `vc_redist.x64.exe`） | 装出来的目录和绿色版基本一致：Qt DLL、平台插件、fio、许可证、README 全在。`vc_redist` 是 windeployqt 顺手拷进来的 18 MB 运行库*安装程序*，而 CRT 的 DLL 已经跟着 `{app}` 走了，它本身又是压缩包（塞进 setup 后几乎不缩小），所以排除——安装包从 36 MB 降到 18 MB |
 | 向导里选「为所有用户 / 仅为当前用户」 | `PrivilegesRequired=lowest` + `PrivilegesRequiredOverridesAllowed=dialog`：选所有用户才提权、装到 `{autopf}\Disktest`；选当前用户装到 `%LOCALAPPDATA%\Programs\Disktest`，不弹 UAC |
 | 给 `{app}` 加 `users-modify` | 程序「保存测试数据」默认存到自己所在目录（`mainwindow.cpp` 里保存对话框的默认路径）。装进 Program Files 后普通用户没有写权限，保存会直接失败 |
-| 许可协议页 + 「信息」页 | 前者是 GPL 全文（分发二进制必须给）；后者是 `installer\preinstall.txt`——**这个程序会写满分区**的警告 |
+| 许可协议页 + 「信息」页 | 前者是 GPL 全文（分发二进制必须给）；后者是 `installer\preinstall.*.txt`——**这个程序会写满分区**的警告，三种界面语言各一份 |
 | 开始菜单 / 桌面快捷方式、卸载项、`App Paths` | 常规安装体验；卸载会把这些注册表项一起清掉 |
 | 编译期检查 `build\dist` 完整性 | 少 `qwindows.dll` 或 fio 时直接 `#error`，不产出一个装完打不开的包 |
 
-两个编码上的硬要求（错了就是满屏乱码）：
+#### 界面语言：简体中文 / 繁體中文 / English
 
-- `installer\disktest.iss`、`preinstall.txt`、`ChineseSimplified.isl` 必须存成 **UTF-8 with BOM**。
-  Inno 的编译器读不到 BOM 时会按 ANSI 代码页解释中文。
-- 官方 Inno **不带**简体中文翻译。`installer\ChineseSimplified.isl` 是随仓库维护的那份
-  （来源：kira-96/Inno-Setup-Chinese-Simplified-Translation），中文放 `[Languages]` 第一位，
-  系统语言匹配不上时用它回退。
+启动时会先弹一个「选择安装语言」对话框（Inno 的 `ShowLanguageDialog=auto`，两种以上语言就弹），
+默认选中的那份按系统语言决定：`.isl` 里的 `LanguageID` 对上哪份就用哪份（简体 `$0804`、繁体 `$0404`），
+一份都对不上就回退到 `[Languages]` 里的第一个（简体）。要强制指定就加 `/LANG`：
+
+```bat
+disktest-3.0.7-setup.exe /LANG=chinesetraditional     繁体向导
+disktest-3.0.7-setup.exe /LANG=english                English wizard
+disktest-3.0.7-setup.exe /LANG=chinesesimplified      简体向导
+```
+
+- 两份 `.isl` 都取自 jrsoftware 的 istrans 列表（简体 Zhenghan Yang、繁体 GoneTone），
+  随仓库维护在 `installer\` 下 —— 官方 Inno 自带的 `Languages\` 里没有中文，
+  不这样做的话每台打包机都得自己装一遍。
+- **品牌名也跟着语言走**：快捷方式和卸载项在繁体里叫「磁碟測試By MOONLIGHT」、
+  英文里叫「Disk Tester By MOONLIGHT」（`[CustomMessages]` 的 `AppShortcutName`），
+  标题栏同理（`[Messages]` 的 `SetupWindowTitle`）。
+- **「安装前必读」三份**：`preinstall.zh-CN.txt` / `preinstall.zh-TW.txt` / `preinstall.en.txt`。
+  `InfoBeforeFile` 在编译期只能指定一个文件，所以三份都以 `dontcopy` 打进 setup，
+  翻到「信息」页时在 `[Code]` 的 `CurPageChanged` 里按 `ActiveLanguage`
+  用 `ExtractTemporaryFile` + `LoadFromFile` 把 memo 换成对应那份。
+  （放在 `InitializeWizard` 里改会被随后的页面加载覆盖掉，必须在 `CurPageChanged`。）
+
+新增一门语言要动四处：放一个 `<Lang>.isl` → `[Languages]` 加一行 →
+加一份 `preinstall.<tag>.txt` → `[Messages]`/`[CustomMessages]`/`[Code]` 各补一条。
+
+几个编码和文件上的硬要求（错了就是满屏乱码或者提示找不到文件）：
+
+- `installer\disktest.iss`、`preinstall.*.txt`、`ChineseSimplified.isl`、
+  `ChineseTraditional.isl` **必须**存成 **UTF-8 with BOM**。
+  Inno 读不到 BOM 时按 ANSI 代码页解释中文。
+- `[Languages]` 的次序就是回退次序。
 
 **实测验证过的**（2026-10-17，本机 Qt 6.8.3 + MSVC 19.51）：
 
 - 静默装到临时目录（`/VERYSILENT /CURRENTUSER /DIR=...`）后，用
   `PATH=C:\Windows\System32;C:\Windows`（不含 Qt）启动 `--selftest-parse` → 退出码 0、结论 PASS；
 - 装好的 GUI 能正常起来，`fio 引擎`那一栏指向安装目录里的 `fio\fio.exe`；
-- 安装向导的中文界面逐页截图确认无乱码：安装范围对话框、许可协议页、「信息」页、选择目标位置页；
+- 简体 / 繁体 / English 三种向导逐页截图确认无乱码：安装范围对话框、许可协议页、
+  「信息」页（三份译文各自出现）、选择目标位置页；
+- 三种语言分别静默安装，卸载项与开始菜单名分别是「磁盘测试By MOONLIGHT 3.0.7」/
+  「磁碟測試By MOONLIGHT 3.0.7」/「Disk Tester By MOONLIGHT 3.0.7」；
+- 不带 `/LANG` 时先出「选择安装语言」，列表默认选中简体（跟随系统语言）；
+  这个对话框在加英文那版就有，不是繁体引出来的；`/LANG=` 和静默安装都不弹。
 - 卸载后安装目录、开始菜单项、`HKCU` 下的卸载项和 `App Paths` 全部清掉。
+- **没有实测到的**：真实 zh-TW 系统上自动选中繁体（本机是 zh-CN，换系统语言代价太大）。
+  依据是 Inno 的 `LanguageID` 匹配规则；`/LANG=chinesetraditional` 的全流程已经逐页验过。
 
 > **安装包没有代码签名**：别人第一次双击会碰到 SmartScreen「Windows 已保护你的电脑」，
 > 要点「更多信息 → 仍要运行」。消掉它只能买代码签名证书再用 `signtool` 签，
@@ -1536,15 +1569,20 @@ disktest/
 ├─ CMakeLists.txt           构建 + 打包（package / deploy / icon 目标）
 ├─ build.bat                一键脚本（build/package/installer/selftest/run/clean/headers/check/git）
 ├─ installer/               安装包（Inno Setup）
-│   ├─ disktest.iss         安装脚本：装什么、装到哪、快捷方式/卸载项/权限
-│   ├─ preinstall.txt      「信息」页：会写满分区的警告（UTF-8 with BOM）
-│   └─ ChineseSimplified.isl  Inno 6 的简体中文翻译（官方不带）
+│   ├─ disktest.iss         安装脚本：装什么、装到哪、快捷方式/卸载项/权限/界面语言
+│   ├─ preinstall.zh-CN.txt 「信息」页：会写满分区的警告，三种语言各一份
+│   ├─ preinstall.zh-TW.txt
+│   ├─ preinstall.en.txt
+│   ├─ ChineseSimplified.isl  Inno 6 的简体中文翻译（官方不带，取自 istrans 列表）
+│   └─ ChineseTraditional.isl Inno 6 的繁体中文翻译（官方不带，取自 istrans 列表）
 ├─ README.md                ★ 面向用户：装、用、注意事项
 ├─ .gitignore
 │
 ├─ src/                     全部源码（每个文件都带 SPDX 版权头）
-│   uitext.h                ★ 界面上所有文字都在这里，改文案只改这个文件
-│   main.cpp                入口 + 命令行（--selftest 等）
+│   uitext.def              ★ 界面上所有文字都在这里，改文案只改这个文件
+│   uitext.h                把 uitext.def 展开成函数 + 平台别名 + 文案目录
+│   i18n.h/.cpp             界面语言：语言选择、译文表加载、--i18n-check
+│   main.cpp                入口 + 命令行（--selftest / --lang / --i18n-check 等）
 │   fioconfig.h/.cpp        参数模型、文件规划、job 生成、裸设备拦截
 │   driveinfo.h/.cpp        驱动器枚举 / 容量查询 / 测试文件扫描 / 提权检测
 │   prociocounter.h/.cpp    GetProcessIoCounters 封装（500ms 实时速度来源）
@@ -1555,17 +1593,21 @@ disktest/
 │   perfcell.h/.cpp         性能结果格子控件
 │   mainwindow.h/.cpp       界面与阶段编排
 │
-├─ resources/               图标与 Windows 资源模板
+├─ resources/               图标、Windows 资源模板与界面译文
 │   app.rc.in               exe 图标 + 版本资源（右键属性 → 详细信息）的模板，
 │                           CMake 填进版本号后生成 build/app.rc 再编译
 │   logo.ico                多尺寸图标（给 Windows 用）
 │   logo-source.ico         母版（128×128）
 │   logo-window.png         窗口图标（编进 qrc）
 │   resources.qrc
+│   i18n/en.tsv             英文译文（编进 qrc；放在 exe 目录旁的 i18n\ 里会优先用）
+│   i18n/zh_TW.tsv          繁體中文译文（生成方式见 §8.2）
 │
 ├─ tools/                   开发辅助
 │   make_icon.py            由母版生成多尺寸 ico 与 png（需要 Pillow）
 │   add_license_headers.py  给源文件补 SPDX 版权头（幂等，build.bat headers 调它）
+│   make_i18n_template.py   从 uitext.def 导出「键 + 中文原文」的翻译模板
+│   make_zh_tw.py           重新生成 resources/i18n/zh_TW.tsv（需要 zhconv）
 │   make_perf_test_csv.py   造合成性能 CSV，用来验证加载路径
 │   measure_csv_vs_json.py  CSV 与 JSON 的体积对比（当初选格式时量的）
 │   make-installer.ps1      把 build\dist 编成 setup.exe（build.bat installer 调它）
@@ -1614,6 +1656,12 @@ disktest/
 上一次用性能模式跑过，这次打开就是性能模式；上一次选的是系统盘，这次一进来就选着系统盘，
 很容易顺手点「开始测试」测错盘。硬盘测试工具的启动状态应该永远是确定的。
 
+**唯一的例外是界面语言**：它存在 **exe 旁边的 `disktest.ini`** 里（只有 `[ui] language=`
+一个键），跟着程序目录走——整个文件夹拷到别的机器，语言设置一起带走。
+那个目录真写不进去时（绿色版手工解压到 `Program Files`、Linux 装到 `/usr/bin`）
+才退回用户目录（`%APPDATA%\disktest\` / `~/.config/disktest/`），见 §8.3。
+测试相关的参数**依然一个都不落盘**，`resetToDefaultSettings()` 也只管这些。
+
 > 顺带一提：**不预选盘**是特意做的。上一版在启动时会静默选中列表第一行，
 > 而第一行常常是系统盘。现在启动时一行都不选，状态栏提示"请先在「选择磁盘」列表里选中要测试的分区"。
 
@@ -1658,24 +1706,116 @@ fio 这条以前会从 exe 目录**往上翻最多 5 层**去找源码树里的 
 打包出来的 `build\dist` 正好满足这个布局——Qt DLL 就在 exe 旁边，fio 在 `dist\fio\` 里，
 所以解压到任何目录都能直接跑（实测：把 PATH 清成只剩 `C:\WINDOWS` 也能正常启动并跑完自检）。
 
-## 8. 改文案
+## 8. 界面文案与多语言
 
-**界面上每一个字都集中在 [`src/uitext.h`](../src/uitext.h) 里**（314 个常量），
-`.cpp` 里已经没有任何中文裸字面量。改完重新 `build.bat` 一次即可。
+界面支持 **简体中文 / 繁體中文 / English**。文案只有一份源（简体中文），
+英文与繁体中文是**译文表**，程序启动时按当前语言查表，查不到就退回中文原文。
+
+### 8.1 文案表：`src/uitext.def`
+
+`src/uitext.def` 里一行一条：
 
 ```cpp
 // ── 测试阶段 ──
-inline const QString kChkWrite  = QStringLiteral("写入：把分区写满");
-inline const QString kChkRead   = QStringLiteral("读取：写满后读回");
-inline const QString kChkVerify = QStringLiteral("校验数据（crc32c 逐块比对）");
+UI_TEXT(kCheckWrite,  "写入")
+UI_TEXT(kCheckRead,   "读取")
+UI_TEXT(kCheckVerify, "校验")
+UI_TEXT_RAW(kRunDataTimeStampFmt, "yyyyMMdd-HHmmss")   // 不翻译
 ```
 
-- 命名规则 `k<区域><用途>`，分批分组，组内 `=` 对齐；
-- 含 `%1 %2` 的是 `QString::arg()` 占位符，**改动时别把它们删掉**；
-- 自检报告正文那些行靠空格对齐（如 `"Qt 版本            : "`），
-  改的时候要保持冒号前的空格数，否则报告列会错位；
-- 顶部三个应用信息：`kAuthor`（作者）、`kContact`（联系方式）默认是占位符，**请改成你自己的**；
-  `kAppVersion` 取自 `CMakeLists.txt` 的 `project(... VERSION x.y.z)`，不要在这里写死。
+`uitext.h` 把这个文件**展开两次**：一次把每行变成
+`QString kCheckWrite() { return i18n::text("kCheckWrite", "写入"); }`，
+一次收成"键 → 中文原文"的目录（给 `--i18n-check` 用）。所以：
+
+- 用法和从前的常量完全一样：`m_writeCheck = new QCheckBox(kCheckWrite(), ...)`；
+- **为什么是函数不是常量**：常量在 `main()` 之前就初始化完了，那时候还没读到
+  `--lang`、也还没读到保存的语言；函数则每次都按当前语言取值；
+- 命名规则 `k<区域><用途>`；含 `%1 %2` 的是 `QString::arg()` 占位符，别删；
+- `UI_TEXT_RAW` 是**不翻译**的（版本号、编译时间、URL、日期格式、文件名模式）；
+- 同一句话在两个平台上写法不同时（`fio.exe` / `fio`、提权 / root、文件对话框过滤），
+  写成 `kXxx_Win` / `kXxx_Posix` 两个键，`uitext.h` 末尾按平台接到真正的名字上。
+  **一个键只能有一条译文**，所以不能只写一个键配两段中文。
+
+自检报告正文那些行靠空格对齐（如 `"Qt 版本            : "`），改的时候要保持冒号前的空格数，
+否则报告列会错位。顶部的应用信息里，`kAuthor`（作者）与 `kContact`（联系方式）
+是 `UI_TEXT_RAW`：默认值请改成你自己的；`kAppVersion` 取自 `CMakeLists.txt` 的
+`project(... VERSION x.y.z)`，不要在这写死。
+
+### 8.2 译文表：`resources/i18n/*.tsv`
+
+```
+# 注释行以 # 开头
+kCheckWrite	Write
+kLogPerfItemStart	%1 starts (each pass %2 s, one read pass + one write pass)
+```
+
+- 键是 `.def` 里的常量名；值是译文；
+- `\n` 是换行（提示框正文大多是两行以上的），`\\` 是反斜杠；
+- **占位符一个都不能少**：`--i18n-check` 会逐条比对中文原文与译文里的 `%n` 集合；
+- 译文表按这个顺序找：**① `exe` 旁边的 `i18n\en.tsv`** → ② 编进 exe 的那份（qrc）。
+  所以译者/打包者改一行译文**不用重新编译**，把文件丢到 `exe目录\i18n\` 就行；
+- 英文和繁体中文都已 100% 覆盖。要加第三种语言：复制 `en.tsv` 清空值
+  （`python tools/make_i18n_template.py > resources/i18n/xx.tsv` 可以导出带中文原文的模板），
+  翻完在 `i18n.h` 的 `Language` 里加一项、在 `resources.qrc` 里加一行即可。
+
+繁体中文是 `tools/make_zh_tw.py` 从简体**生成**的（逐字符转换 + 台湾用语表，
+如 文件→檔案、数据→資料、网络→網路、队列→佇列、性能→效能）。
+用法：`python tools/make_zh_tw.py`（需要 `pip install zhconv`，只在生成时用，
+程序本身不依赖它）。机器转换不懂语境，**改完简体文案记得重新生成并扫一眼**；
+也可以直接手工改 `zh_TW.tsv`，只是下次跑脚本会被覆盖。
+
+### 8.3 语言怎么选
+
+优先级：**系统语言 < 上次在菜单里选的那个 < 命令行 `--lang`**。
+
+- 首次启动跟随系统 UI 语言：`zh-CN` 系 → 简体中文，`zh-TW` / `zh-HK` / `zh-MO` → 繁體中文，
+  其它一律 **English**（不给看不懂中文的人塞简体）；
+- 手动切换：「帮助 → 语言 / Language」。菜单标题和三个语言名**故意不翻译**，
+  英文界面下也找得到「简体中文」「繁體中文」；
+- 切换语言 = **存下选择 + 用 `--lang` 重新启动一份新进程**（见 `MainWindow::switchLanguage`）。
+  界面文案是搭窗口时取的，原地只重译控件等于把整个窗口拆了重建，
+  跑着的测试也会跟着丢；重启最省事。**测试运行中不允许切换**，会提示先停止；
+- 保存位置：**exe 旁边的 `disktest.ini`**（`[ui] language=`，这是程序唯一会写的配置）。
+  跟着程序目录走，整个文件夹拷走设置就一起带走了；**只存语言这一个键**——
+  测试参数仍然每次启动回默认值（见 §7「启动状态是固定的，不记忆」）。
+- 写到哪一步是**先试后定**的（`i18n::saveChoice`）：先试着写 exe 旁边那份，
+  `QSettings::sync()` 报错才退回用户目录（`%APPDATA%\disktest\disktest.ini` /
+  `~/.config/disktest/disktest.ini`）。实测依据：
+
+  | 程序目录 | 普通用户能写吗 | 语言存哪 |
+  | --- | --- | --- |
+  | 安装包装出来的（`Program Files\Disktest` 或 `%LOCALAPPDATA%\Programs\Disktest`） | **能**——`installer/disktest.iss` 给 `{app}` 加了 `Permissions: users-modify`（同一处权限也是「保存测试数据」把 CSV 存到程序目录的前提） | exe 旁边的 ini |
+  | 绿色版解压到自己有权限的目录 | 能 | exe 旁边的 ini |
+  | 绿色版手工解压到 `C:\Program Files` | **不能**（那里默认 ACL 只给 `Users` 读+执行，实测 `Access denied`） | 用户目录 ini |
+  | Linux 装到 `/usr/bin`、`/opt`（root 所有） | 不能 | `~/.config/disktest/` |
+
+  `disktest.exe --i18n-check` 最后会打一行 `settings file ...`，直接告诉你这份程序
+  实际会写到哪个文件、那里可不可写。
+- **已知取舍**：给"所有用户"安装时，`{app}` 是共享目录，语言设置也就成了整机共享——
+  A 用户切成英文，B 用户看到的也是英文。若在意这一点，就不要用 exe 旁的 ini
+  （改回 `i18n::userSettingsPath()` 即可，那是一条路径的事）。
+
+命令行：
+
+```bat
+disktest.exe --lang en           :: zh_CN / zh_TW / en / auto
+disktest.exe --lang zh_TW
+disktest.exe --i18n-check        :: 查译文覆盖率与占位符，退出码 0 = 全部通过
+```
+
+英文与繁體中文的实际界面（同一台机器、同一份代码）：
+
+![英文界面](images/ui-en.png)
+
+![繁體中文介面](images/ui-zh-TW.png)
+
+### 8.4 哪些地方不翻译
+- **`--selftest` / `--selftest-parse` 的开发者诊断输出**：断言名、逐项检查结果保持中文
+  （那些是给自己看的，跟着界面语言变反而不好对照）。报告里的**字段名**是翻译的。
+- **exe 的版本资源**（资源管理器 → 属性 → 详细信息）：那是 `resources/app.rc.in`
+  在配置期生成的，一个 exe 只有一份。要多语言版本资源得按语言各编一份包。
+- **安装程序**（`installer/disktest.iss`）：目前只有简体中文向导；
+  要加繁体/英文，往 `[Languages]` 里加 `ChineseTraditional.isl` / `Default.isl` 即可。
 
 ## 9. 已知限制
 

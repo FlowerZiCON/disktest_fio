@@ -161,7 +161,7 @@ void fillFileSystemFacts(FileSystemEntry *entry)
     }
 
     if (entry->readOnly) {
-        entry->unavailableReason = kFsReadOnly;
+        entry->unavailableReason = kFsReadOnly();
         return;
     }
     // 网络文件系统（nfs / cifs）在这一层是**照给目录**的：它照样能测，
@@ -207,22 +207,22 @@ QList<DiskEntry> disksFromWindowsVolumes(QStringList *ignored)
             const UINT driveType =
                 ::GetDriveTypeW(reinterpret_cast<LPCWSTR>(root.utf16()));
             if (driveType == DRIVE_REMOTE) {
-                why = kVolumeWhyNetwork;
+                why = kVolumeWhyNetwork();
             } else if (driveType == DRIVE_RAMDISK) {
-                why = kVolumeWhyRamdisk;
+                why = kVolumeWhyRamdisk();
             } else if (driveType == DRIVE_NO_ROOT_DIR || driveType == DRIVE_UNKNOWN) {
-                why = kVolumeWhyNoRoot;
+                why = kVolumeWhyNoRoot();
             } else {
                 // **只问一次**：volumeDiskNumber() 是 CreateFile + DeviceIoControl
                 // 两次内核往返。以前上面问一次、下面又问一次，每个卷白跑一遍。
                 diskNumber = volumeDiskNumber(rootPath);
                 if (diskNumber < 0)
-                    why = kVolumeWhyNoPhysicalDisk;
+                    why = kVolumeWhyNoPhysicalDisk();
             }
         }
         if (!why.isEmpty()) {
             if (ignored)
-                *ignored << kIgnoredVolumeFmt.arg(rootPath.left(2), why);
+                *ignored << kIgnoredVolumeFmt().arg(rootPath.left(2), why);
             continue;
         }
 
@@ -358,7 +358,7 @@ void collectFileSystems(const QJsonObject &node, DiskEntry *disk, bool *sawRoot)
         if (entry.mountPoint.isEmpty()) {
             // 未挂载：文件模式够不着它，但列出来能解释"为什么这块分区测不了"
             entry.bytesTotal = jsonBytes(node.value(QStringLiteral("size")));
-            entry.unavailableReason = kFsNotMounted;
+            entry.unavailableReason = kFsNotMounted();
         } else {
             if (entry.mountPoint == QLatin1String("/"))
                 *sawRoot = true;
@@ -370,7 +370,7 @@ void collectFileSystems(const QJsonObject &node, DiskEntry *disk, bool *sawRoot)
             }
             entry.isNetwork = isNetworkFileSystem(entry.fileSystem);
             if (entry.readOnly)
-                entry.unavailableReason = kFsReadOnly;
+                entry.unavailableReason = kFsReadOnly();
             else
                 entry.suggestedDir = suggestTestDir(entry.mountPoint, &entry.unavailableReason);
         }
@@ -405,7 +405,7 @@ QList<DiskEntry> disksFromLsblk(const QString &json, QStringList *ignored)
             && (jsonBool(node.value(QStringLiteral("ro")))
                 || jsonString(node.value(QStringLiteral("fstype"))) == QLatin1String("squashfs"))) {
             if (ignored) {
-                *ignored << kIgnoredVolumeFmt.arg(
+                *ignored << kIgnoredVolumeFmt().arg(
                     node.value(QStringLiteral("name")).toString(),
                     jsonString(node.value(QStringLiteral("fstype"))));
             }
@@ -464,7 +464,7 @@ QList<DiskEntry> disksFromMountedVolumes(QStringList *ignored)
         const QString fsType = volume.fileSystemType().toLower();
         if (isNetworkFileSystem(fsType)) {
             if (ignored)
-                *ignored << kIgnoredVolumeFmt.arg(volume.rootPath(), kVolumeWhyNetwork);
+                *ignored << kIgnoredVolumeFmt().arg(volume.rootPath(), kVolumeWhyNetwork());
             continue;
         }
         if (fsType == QLatin1String("tmpfs") || fsType == QLatin1String("devtmpfs")
@@ -491,7 +491,7 @@ QList<DiskEntry> disksFromMountedVolumes(QStringList *ignored)
         entry.readOnly = volume.isReadOnly();
         entry.isNetwork = isNetworkFileSystem(entry.fileSystem);
         if (entry.readOnly)
-            entry.unavailableReason = kFsReadOnly;
+            entry.unavailableReason = kFsReadOnly();
         else
             entry.suggestedDir = suggestTestDir(entry.mountPoint, &entry.unavailableReason);
 
@@ -514,8 +514,8 @@ double FileSystemEntry::usedPercent() const
 
 QString FileSystemEntry::displayLine() const
 {
-    const QString where = mountPoint.isEmpty() ? kFsNotMounted : mountPoint;
-    return kFsRowLine.arg(kernelName, fileSystem, where);
+    const QString where = mountPoint.isEmpty() ? kFsNotMounted() : mountPoint;
+    return kFsRowLine().arg(kernelName, fileSystem, where);
 }
 
 QString FileSystemEntry::fsLine() const
@@ -550,9 +550,9 @@ QString DiskEntry::displayLine() const
 {
     QString line = nameLine();
     if (isSystemDisk)
-        line += QLatin1Char(' ') + kDiskSystemTag;
+        line += QLatin1Char(' ') + kDiskSystemTag();
     if (isVirtual)
-        line += QLatin1Char(' ') + kDiskVirtualTag;
+        line += QLatin1Char(' ') + kDiskVirtualTag();
     return line;
 }
 
@@ -598,7 +598,7 @@ QString suggestTestDir(const QString &mountPoint, QString *reason)
     };
 
     if (mountPoint.isEmpty())
-        return fail(kFsNotMounted);
+        return fail(kFsNotMounted());
 
     QStringList candidates;
     candidates << mountPoint;
@@ -620,7 +620,7 @@ QString suggestTestDir(const QString &mountPoint, QString *reason)
             continue;
         return QDir::cleanPath(candidate);
     }
-    return fail(kFsNoWritableDir);
+    return fail(kFsNoWritableDir());
 }
 
 bool sameFileSystem(const QString &a, const QString &b)

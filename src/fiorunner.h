@@ -36,11 +36,11 @@ enum class JobKind {
 inline QString jobKindText(JobKind kind)
 {
     switch (kind) {
-    case JobKind::Write: return kPhaseWrite;
-    case JobKind::Read:  return kPhaseRead;
-    case JobKind::Perf:  return kPhasePerf;
+    case JobKind::Write: return kPhaseWrite();
+    case JobKind::Read:  return kPhaseRead();
+    case JobKind::Perf:  return kPhasePerf();
     }
-    return kTextUnknown;
+    return kTextUnknown();
 }
 
 /// 一个阶段结束后的汇总。
