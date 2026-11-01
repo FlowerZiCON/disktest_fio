@@ -263,6 +263,8 @@ private:
     void writeSelfTestReport();
     /// 自检断言：绘图方式与密度两组单选都必须"恰好选中一个"。
     bool verifyExclusiveGroups();
+    /// 自检：图表的颜色必须跟着"当前画的是谁"复位 —— clear() 之后要回到默认红/蓝。
+    bool verifyChartColorReset();
 
     // ---- 参数控件 ----
     QLineEdit    *m_fioPathEdit     = nullptr;
@@ -421,6 +423,9 @@ private:
     QLabel       *m_diskBarLabel    = nullptr;   ///< 进度条右侧：已用 %
     SpeedChart   *m_chart           = nullptr;
     QStackedWidget *m_chartStack    = nullptr;   ///< 0 = 请先开始测试，1 = 图表
+    /// 图表下方的备注框：不参与测试逻辑。保存结果时原样写进 CSV 的 note 参数，
+    /// 打开结果时再显示回来；**程序本身不记住它**（关掉程序就没了）。
+    QLineEdit    *m_chartNoteEdit   = nullptr;
     QTimer       *m_versionDebounce = nullptr;
 
     FioRunner *m_runner = nullptr;

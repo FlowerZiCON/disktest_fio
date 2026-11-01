@@ -265,6 +265,22 @@ void SpeedChart::clear()
     m_maxY = 1.0;
     m_lastX = 0.0;
     m_axisY->setRange(0, 100);
+
+    // 颜色也要一起复位。颜色表达的是"当前画的是谁"：性能测试按测试项换色
+    // （顺序项红/蓝、随机项黄/绿，见 setSeriesColors），而可靠性测试**从不**
+    // 主动设颜色、只靠这里的默认值。不在 clear() 里复位的话，点过随机项之后
+    // 回到可靠性测试重新采集，画出来的曲线会还是上一项的黄绿色。
+    setSeriesColors(kReadColor, kWriteColor);
+}
+
+QColor SpeedChart::readSeriesColor() const
+{
+    return m_readLine->pen().color();
+}
+
+QColor SpeedChart::writeSeriesColor() const
+{
+    return m_writeLine->pen().color();
 }
 
 void SpeedChart::addVerifyMarker(double x)

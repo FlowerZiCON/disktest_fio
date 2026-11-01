@@ -234,6 +234,8 @@ UI_TEXT(kSeriesRead, "读取速度")
 UI_TEXT(kSeriesWrite, "写入速度")
 UI_TEXT(kAxisCapacity, "容量（GiB）")
 UI_TEXT(kAxisSpeed, "速度（MiB/s）")
+// 图表下方的备注框：只是给人看的说明，不进配置、不写测试数据，也不影响测试
+UI_TEXT(kChartNotePlaceholder, "请在此输入")
 
 // ── 状态栏 ──
 UI_TEXT(kModeElevated, "提权模式")

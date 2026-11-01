@@ -20,6 +20,7 @@
 QT_BEGIN_NAMESPACE
 class QVBoxLayout;
 class QLabel;
+class QLineEdit;
 class QRadioButton;
 QT_END_NAMESPACE
 
@@ -73,6 +74,9 @@ private:
     QVector<RunData::Trace> m_traces;
     SpeedChart *m_chart     = nullptr;
     QLabel     *m_hintLabel = nullptr;
+    /// 图表下方的备注（文件里有 note 才建）。**只读**：回看窗口改了也存不回去，
+    /// 能编辑只会让人以为改动会被保留。
+    QLineEdit  *m_noteEdit  = nullptr;
     QRadioButton *m_lineRadio = nullptr;
     QRadioButton *m_scatterRadio = nullptr;
     QRadioButton *m_densityHighRadio = nullptr;

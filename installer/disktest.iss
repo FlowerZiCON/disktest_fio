@@ -21,7 +21,7 @@
 #define MyAppNameEn "Disk Tester By MOONLIGHT"
 #ifndef MyAppVersion
   ; 只是个兜底：make-installer.ps1 从 CMakeLists.txt 读版本并通过 /D 传进来。
-  #define MyAppVersion "3.0.7"
+  #define MyAppVersion "3.0.8"
 #endif
 #define MyAppPublisher "MOONLIGHT"
 #define MyAppExeName "disktest.exe"

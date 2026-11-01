@@ -26,6 +26,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPair>
 #include <QPushButton>
@@ -225,6 +226,23 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     m_chart = new SpeedChart(this);
     buildChartStyleRow(root);
     root->addWidget(m_chart, 1);
+
+    // ---- 图表下方的备注 ----
+    // 和主界面同一个位置、同一套字号/高度（见 MainWindow::buildChartPanel）。
+    // **只读**：这里是回看历史结果，改了也存不回去（程序本身不记住备注），
+    // 能编辑只会让人以为改动会被保留。
+    // 老文件没有 note 就整块不出现：一个空框会让人以为内容丢了。
+    const QString note = m_data.chartNote();
+    if (!note.isEmpty()) {
+        m_noteEdit = new QLineEdit(note, this);
+        m_noteEdit->setObjectName(QStringLiteral("chartNoteEdit"));
+        m_noteEdit->setReadOnly(true);
+        QFont noteFont = m_noteEdit->font();
+        noteFont.setPointSizeF(qMax(11.0, noteFont.pointSizeF() + 2.0));
+        m_noteEdit->setFont(noteFont);
+        m_noteEdit->setMinimumHeight(38);
+        root->addWidget(m_noteEdit);
+    }
 
     if (perf)
         buildPerfTable(root);

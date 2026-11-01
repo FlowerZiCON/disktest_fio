@@ -148,6 +148,7 @@ kSeriesRead	讀取速度
 kSeriesWrite	寫入速度
 kAxisCapacity	容量（GiB）
 kAxisSpeed	速度（MiB/s）
+kChartNotePlaceholder	請在此輸入
 kModeElevated	提高權限模式
 kModeNormal	普通模式
 kModeElevatedTip_Win	目前以系統管理員身分執行，可以存取需要提高權限的裝置。

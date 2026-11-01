@@ -155,6 +155,7 @@ kSeriesRead	Read speed
 kSeriesWrite	Write speed
 kAxisCapacity	Capacity (GiB)
 kAxisSpeed	Speed (MiB/s)
+kChartNotePlaceholder	Enter a note here
 kModeElevated	Elevated mode
 kModeNormal	Normal mode
 kModeElevatedTip_Win	Running as administrator, so devices that require elevation can be accessed.

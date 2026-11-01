@@ -996,5 +996,31 @@ bool RunData::runParserSelfTest(QStringList *lines)
               QStringLiteral("(=%1)").arg(noParam.perfRuntimeSeconds(), 0, 'f', 1));
     }
 
+    // 14) 图表备注：值里可以带逗号（参数行按第一个逗号切），
+    //     没有这一项的老文件读出来必须是空串，不能因此报错。
+    {
+        const auto body = [&](const QString &noteLine) {
+            QStringList rows;
+            rows << QStringLiteral("# ml_disktest-run-data;1")
+                 << versionLine
+                 << QStringLiteral("test_mode,reliability");
+            if (!noteLine.isEmpty())
+                rows << noteLine;
+            rows << QStringLiteral("# [samples]") << header9
+                 << QStringLiteral("0.000000,0.000,0,0.000000,100.000,1,0.500,0,0");
+            return rows.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        };
+        RunData withNote;
+        RunData withoutNote;
+        const QString note = QStringLiteral("换过 SATA 线后复测, 室温 26℃");
+        const bool ok = parseText(body(QStringLiteral("note,") + note), &withNote)
+                        && parseText(body(QString()), &withoutNote);
+        check(QStringLiteral("图表备注连逗号一起读回来"),
+              ok && withNote.chartNote() == note,
+              QStringLiteral("(=%1)").arg(withNote.chartNote()));
+        check(QStringLiteral("没有备注的老文件读出空串"),
+              ok && withoutNote.chartNote().isEmpty(), QString());
+    }
+
     return allOk;
 }

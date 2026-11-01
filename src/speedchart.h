@@ -158,6 +158,11 @@ public:
     /// 换读/写两条线的颜色。性能模式里随机项要改成黄/绿。
     void setSeriesColors(const QColor &readColor, const QColor &writeColor);
 
+    /// 当前读取 / 写入序列的颜色。
+    /// 给自检用：验证 clear() 必须把颜色复位成默认红/蓝（见 SpeedChart::clear）。
+    QColor readSeriesColor() const;
+    QColor writeSeriesColor() const;
+
     /// 追加一个采样点。readX / writeX 是各自**已处理的容量（GB）**。
     ///
     /// **只进 m_history，不动任何序列。** 这一点是性能的关键：

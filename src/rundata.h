@@ -68,6 +68,8 @@ public:
     }
     /// 写这份结果的程序版本参数名。
     static QString appVersionKey() { return QStringLiteral("app_version"); }
+    /// 图表备注的参数名。可选：老文件没有这一项，读出来就是空串。
+    static QString noteKey() { return QStringLiteral("note"); }
 
     /// 能打开的最低版本。**比这个低的文件一律拒收**，提示版本过旧。
     ///
@@ -99,6 +101,10 @@ public:
     double paramDouble(const QString &key, double fallback) const;
     /// 参数是否存在（老文件可能整段缺失）。
     bool   hasParam(const QString &key) const { return params.contains(key); }
+
+    /// 图表备注（参数段 note）的原文。空串 = 没写。
+    /// **只用于显示**：不参与渲染、不参与任何判断。
+    QString chartNote() const { return params.value(noteKey()); }
 
     /// 横轴上限（GiB）。优先用文件里记的 axis_max_GiB；只有它缺失、非有限值、
     /// 或者**包不住数据**（小于最大采样横坐标）时才按数据自己算一个。

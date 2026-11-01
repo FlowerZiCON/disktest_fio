@@ -790,6 +790,24 @@ QWidget *MainWindow::buildChartPanel()
     chartLayout->addLayout(styleRow);
     chartLayout->addWidget(m_chartStack, 1);
 
+    // ---- 图表备注 ----
+    // 图表**下方**一个输入框，未输入时显示占位提示。
+    // 它不参与任何测试逻辑：没有信号连到别处，configFromUi 也不读它，
+    // fio 的参数和测试流程完全不受影响。保存结果时只把它原样写进 CSV 的 note。
+    // 可靠性和性能用的是同一个实时图表，因此这一个框两种模式都有。
+    m_chartNoteEdit = new QLineEdit(chartBox);
+    m_chartNoteEdit->setObjectName(QStringLiteral("chartNoteEdit"));
+    m_chartNoteEdit->setPlaceholderText(kChartNotePlaceholder());
+    m_chartNoteEdit->setClearButtonEnabled(true);
+    m_chartNoteEdit->setMaxLength(500);
+    // 备注往往不止四个字，默认那一行又窄又小：字号放大两号、高度也撑起来，
+    // 一眼能看出这里可以写字，点起来也更容易命中。
+    QFont chartNoteFont = m_chartNoteEdit->font();
+    chartNoteFont.setPointSizeF(qMax(11.0, chartNoteFont.pointSizeF() + 2.0));
+    m_chartNoteEdit->setFont(chartNoteFont);
+    m_chartNoteEdit->setMinimumHeight(38);
+    chartLayout->addWidget(m_chartNoteEdit);
+
     layout->addLayout(cards);
     layout->addWidget(m_verifyBanner);
     layout->addLayout(diskRow);
@@ -1830,6 +1848,19 @@ void MainWindow::onCleanupTestFiles()
     updateReadAvailability();
 }
 
+/// 图表备注写进 CSV 前的清洗。
+///
+/// 结果文件的参数段是"一行一条 `key,value`"，值里可以有逗号（读取端按**第一个**
+/// 逗号切分），但**不能有换行**——那会把一条备注劈成两行，后一行会被当成未知参数。
+/// QLineEdit 正常情况下打不出换行，可粘贴和输入法都可能带进来，这里兜底。
+static QString chartNoteForRunData(const QString &text)
+{
+    QString out = text;
+    out.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    out.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    return out;
+}
+
 void MainWindow::onSaveRunData()
 {
     // 两种模式的数据来源不同（和 saveRunDataTo 里的判断保持一致）：
@@ -1916,6 +1947,10 @@ bool MainWindow::saveRunDataTo(const QString &path, QString *error)
           RunData::modeKey(m_activeConfig.testMode == FioConfig::TestMode::Performance
                                ? RunData::Mode::Performance
                                : RunData::Mode::Reliability));
+    // 图表下方的备注：可选，只是给人看的一句说明。**不影响任何测试行为**，
+    // 程序本身也不记住它 —— 只有保存到 CSV 才会留下，打开时再显示回图表下方。
+    param(RunData::noteKey(),
+          chartNoteForRunData(m_chartNoteEdit ? m_chartNoteEdit->text() : QString()));
     param(QStringLiteral("mode"), m_activeConfig.modeText());
     param(QStringLiteral("mode_key"), FioConfig::modeKey(m_activeConfig.mode));
     param(QStringLiteral("target"), m_activeConfig.targetDir);
@@ -2136,6 +2171,11 @@ bool MainWindow::loadRunDataFrom(const QString &path, QString *error, SpeedChart
         m_densityHighRadio->setChecked(true);
     onPlotStyleChanged();   // 载入的绘图方式可能不是折线图，同步一下密度可见性
     applyDensity();
+
+    // 备注也跟着文件走（程序本身不记住它）：灌回输入框，
+    // 和结果窗口在图表下方看到的是同一句话。
+    if (m_chartNoteEdit)
+        m_chartNoteEdit->setText(runData.chartNote());
 
     // 卡片：和测试结束一样，"当前速度"留空——历史数据没有"此刻的速度"。
     // 平均值取文件里记录的"分阶段"平均值，不能拿全部采样点重算：
@@ -3652,6 +3692,18 @@ void MainWindow::showPerfItemTrace(int itemIndex)
                                                               : SpeedChart::Density::High);
 
     statusBar()->showMessage(kTraceShownTip().arg(FioConfig::perfItemName(item)));
+
+    // 上方两张"平均"卡片跟着**当前显示的那一项**走：点哪一项的图表，
+    // 就显示那一项的读取/写入平均值。以前它们只在每趟跑完时被覆盖，
+    // 所以无论点哪一项，看到的都是最后跑完那一项的数。
+    // 取值直接读结果格子：切盘/换项时格子与结果数据始终是同一份，
+    // 没测过的方向是 -1，formatSpeed() 会显示 "--"。
+    const double readValue = m_perfReadCells[itemIndex] ? m_perfReadCells[itemIndex]->value()
+                                                        : -1.0;
+    const double writeValue = m_perfWriteCells[itemIndex] ? m_perfWriteCells[itemIndex]->value()
+                                                          : -1.0;
+    m_avgReadLabel->setText(formatSpeed(readValue));
+    m_avgWriteLabel->setText(formatSpeed(writeValue));
 }
 
 void MainWindow::finishPerfRun()
@@ -3871,6 +3923,20 @@ bool MainWindow::verifyExclusiveGroups()
     return ok;
 }
 
+bool MainWindow::verifyChartColorReset()
+{
+    // 回归断言：颜色表达的是"当前画的是谁"。
+    // 性能测试按测试项换色（顺序项红/蓝、随机项黄/绿），可靠性测试不设颜色、
+    // 只用默认红/蓝 —— 所以 clear() 必须把颜色复位。以前 clear() 只清数据、
+    // 不动画笔，结果点过随机项之后回到可靠性测试，画出来的曲线还是黄绿色。
+    SpeedChart probe;
+    const QColor defaultRead = probe.readSeriesColor();
+    const QColor defaultWrite = probe.writeSeriesColor();
+    probe.setSeriesColors(QColor(230, 200, 0), QColor(0, 180, 0));
+    probe.clear();
+    return probe.readSeriesColor() == defaultRead && probe.writeSeriesColor() == defaultWrite;
+}
+
 void MainWindow::runSelfTest()
 {
     m_selfTestMode = true;
@@ -4031,9 +4097,6 @@ void MainWindow::writeSelfTestReport()
     const QString windowPngPath = QDir(m_selfTestOutDir).absoluteFilePath(QStringLiteral("window.png"));
     const QString rawPath = QDir(m_selfTestOutDir).absoluteFilePath(QStringLiteral("fio-output.log"));
     const QString csvPath = QDir(m_selfTestOutDir).absoluteFilePath(QStringLiteral("samples.csv"));
-
-    const bool chartSaved = m_chart->viewWidget()->grab().save(pngPath, "PNG");
-    const bool windowSaved = grab().save(windowPngPath, "PNG");
 
     bool csvSaved = false;
     QFile csvFile(csvPath);
@@ -4207,6 +4270,10 @@ void MainWindow::writeSelfTestReport()
     const bool noReduceGuard = (SpeedChart::reduceLttb(spikeData, 9000).size() == 5000)
                                && (SpeedChart::reduceEvenly(spikeData, 9000).size() == 5000);
 
+    // 颜色复位：性能项用黄/绿，clear() 之后必须回到默认红/蓝，
+    // 否则点过随机项再回到可靠性测试，画出来的曲线还是上一项的颜色。
+    const bool colorResetGuard = verifyChartColorReset();
+
     const struct { QString note; bool ok; } stepChecks[] = {
         { QStringLiteral("LTTB 压到 500 点、首末点保留"),
           lttbThin.size() == 500 && lttbThin.first() == spikeData.first()
@@ -4218,6 +4285,7 @@ void MainWindow::writeSelfTestReport()
           evenThin.size() == 500 && evenThin.first() == spikeData.first()
               && evenThin.last() == spikeData.last() },
         { QStringLiteral("目标点数大于原序列时原样返回"), noReduceGuard },
+        { QStringLiteral("clear() 后曲线颜色回到默认红/蓝"), colorResetGuard },
     };
     bool stepGuard = true;
     QStringList stepLines;
@@ -4242,7 +4310,27 @@ void MainWindow::writeSelfTestReport()
     if (m_activeConfig.testMode == FioConfig::TestMode::Performance
         && m_perfResultCount > 0 && !m_perfReadTrace[0].isEmpty()) {
         showPerfItemTrace(0);
+
+        // 点了第 0 项的格子之后，上方两张平均卡片必须跟着换成第 0 项的读数
+        // （不能还停在最后跑完那一项的数值）。这一条只有性能自检才成立。
+        const QString expectedRead =
+            formatSpeed(m_perfReadCells[0] ? m_perfReadCells[0]->value() : -1.0);
+        const QString expectedWrite =
+            formatSpeed(m_perfWriteCells[0] ? m_perfWriteCells[0]->value() : -1.0);
+        const bool followed = (m_avgReadLabel->text() == expectedRead)
+                              && (m_avgWriteLabel->text() == expectedWrite);
+        stepGuard = stepGuard && followed;
+        stepLines << kSelfTestStepLine().arg(
+            QStringLiteral("平均卡片跟随所选测试项（读 %1 / 写 %2）")
+                .arg(expectedRead, expectedWrite),
+            followed ? QStringLiteral("OK") : kSelfTestViolation());
     }
+
+    // 截图要放在上面"自动点开某一项"**之后**：性能自检的截图必须和报告里的
+    // 卡片数字是同一时刻的状态。放在函数开头抓的话，图上还是最后跑完那一项
+    // （随机项、黄绿色），报告却写着点开第 0 项之后的红蓝数值，两边对不上。
+    const bool chartSaved = m_chart->viewWidget()->grab().save(pngPath, "PNG");
+    const bool windowSaved = grab().save(windowPngPath, "PNG");
 
     // 只有写入阶段被要求跑时，测试文件才应该存在；
     // 加载历史数据时不检查磁盘上的文件，也没有阶段结果。
