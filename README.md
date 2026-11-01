@@ -84,7 +84,6 @@ disktest.exe --lang zh_TW
   并累计处数。图上每一处坏块还会画一条**黄色背景色带**，一眼能看出坏在哪一段。
 - 结论会明确写出来，例如"本次共发现 253 处不一致，该磁盘存在问题，
   请尽快备份数据并更换该盘"。
-- 
 ![verifyfail.png](docs/images/verifyfail.png)
 
 ### 性能测试
