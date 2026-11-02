@@ -26,6 +26,8 @@ rem %1=/qt  %2=C:\Qt -- identical to "/qt C:\Qt". Both forms work below.
 set "ACTION=build"
 set "SELFTEST_TARGET="
 set "FILL_LIMIT=1000"
+rem Target architecture: x64 (default) or arm64 (cross build from x64 host).
+set "TARGET_ARCH=x64"
 if not defined JOBS set "JOBS=%NUMBER_OF_PROCESSORS%"
 
 :parse_args
@@ -48,12 +50,25 @@ if /i "!ARG!"=="/vs"        ( set "VS_DIR=%~2"          & shift & shift & goto p
 if /i "!ARG!"=="/target"    ( set "SELFTEST_TARGET=%~2" & shift & shift & goto parse_args )
 if /i "!ARG!"=="/filllimit" ( set "FILL_LIMIT=%~2"      & shift & shift & goto parse_args )
 if /i "!ARG!"=="/jobs"      ( set "JOBS=%~2"            & shift & shift & goto parse_args )
+if /i "!ARG!"=="/arch"      ( set "TARGET_ARCH=%~2"     & shift & shift & goto parse_args )
 if /i "!ARG!"=="/message"   ( set "GIT_MSG=%~2"         & shift & shift & goto parse_args )
 echo [ERROR] Unknown argument: !ARG!
 echo.
 goto usage_err
 
 :args_done
+
+rem --- target architecture ---------------------------------------------------
+rem x64 -> build\        arm64 -> build-arm64\   (the two never share a cache)
+if /i "!TARGET_ARCH!"=="arm64" (
+    set "BUILD_DIR=%ROOT%\build-arm64"
+    set "DIST_DIR=!BUILD_DIR!\dist"
+) else (
+    if /i not "!TARGET_ARCH!"=="x64" (
+        echo [ERROR] Unknown /arch value: !TARGET_ARCH!  ^(expected x64 or arm64^)
+        exit /b 1
+    )
+)
 
 rem ============================================================================
 rem  Actions that do not need a compiler.
@@ -79,10 +94,11 @@ rem --- ninja: prefer it when present (single-config, much faster than VS) ---
 set "NINJA="
 for %%i in (ninja.exe) do if not "%%~$PATH:i"=="" set "NINJA=%%~$PATH:i"
 
-rem --- Visual Studio -> vcvars64.bat -----------------------------------------
+rem --- Visual Studio -> vcvars -------------------------------------------------
 rem %ProgramFiles(x86)% expands to a string containing ')', which would close
 rem an if(...) block early -- keep it in a variable and use !PF86! inside blocks.
 set "PF86=%ProgramFiles(x86)%"
+set "VCVARS_ARGS="
 if not defined VCVARS (
     if not defined VS_DIR (
         set "VSWHERE=!PF86!\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -92,12 +108,32 @@ if not defined VCVARS (
             del "%TEMP%\disktest_vs.txt" >nul 2>&1
         )
     )
-    if defined VS_DIR if exist "!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat"
+    if /i "!TARGET_ARCH!"=="arm64" (
+        rem The dedicated wrapper is not always generated (installing just the
+        rem ARM64 build-tools component leaves it out), but vcvarsall.bat knows
+        rem the amd64_arm64 pair and is always there.
+        if defined VS_DIR if exist "!VS_DIR!\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" (
+            set "VCVARS=!VS_DIR!\VC\Auxiliary\Build\vcvarsamd64_arm64.bat"
+        ) else if defined VS_DIR if exist "!VS_DIR!\VC\Auxiliary\Build\vcvarsall.bat" (
+            set "VCVARS=!VS_DIR!\VC\Auxiliary\Build\vcvarsall.bat"
+            set "VCVARS_ARGS=amd64_arm64"
+        )
+    ) else (
+        if defined VS_DIR if exist "!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=!VS_DIR!\VC\Auxiliary\Build\vcvars64.bat"
+    )
 )
 if not defined VCVARS (
-    echo [ERROR] vcvars64.bat not found - no MSVC C++ toolset available.
-    echo         Install the "Desktop development with C++" workload,
-    echo         or point at it with  /vs ^<VS install dir^>.
+    if /i "!TARGET_ARCH!"=="arm64" (
+        echo [ERROR] No MSVC toolset that can target ARM64 was found.
+        echo         Install the "MSVC v14x - ARM64/ARM64EC build tools" component:
+        echo           vs_installer.exe modify --installPath ^<VS dir^> ^
+        echo             --add Microsoft.VisualStudio.Component.VC.14.51.ARM64
+        echo         or point at the install with  /vs ^<VS install dir^>.
+    ) else (
+        echo [ERROR] vcvars64.bat not found - no MSVC C++ toolset available.
+        echo         Install the "Desktop development with C++" workload,
+        echo         or point at it with  /vs ^<VS install dir^>.
+    )
     exit /b 1
 )
 
@@ -111,19 +147,23 @@ rem Workaround if it bothers you: configure once with the VS generator --
 rem this script reuses whatever generator build\ already has:
 rem   cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DCMAKE_PREFIX_PATH=<Qt dir>
 echo [1/4] Loading MSVC environment ...
-call "!VCVARS!" >nul
+call "!VCVARS!" !VCVARS_ARGS! >nul
 if errorlevel 1 (
-    echo [ERROR] vcvars64.bat failed: !VCVARS!
+    echo [ERROR] vcvars failed: !VCVARS! !VCVARS_ARGS!
     exit /b 1
 )
 
 rem --- Qt --------------------------------------------------------------------
 rem /qt  >  QT_DIR env  >  scan C:\Qt  D:\Qt  %USERPROFILE%\Qt
+rem ARM64 kits are named msvc*_arm64*; x64 kits are msvc*_64 (which does not
+rem match the arm64 name -- it ends in "m64", not "_64").
+set "QKIT_GLOB=msvc*_64"
+if /i "!TARGET_ARCH!"=="arm64" set "QKIT_GLOB=msvc*_arm64*"
 if not defined QT_DIR (
     for %%r in ("C:\Qt" "D:\Qt" "%USERPROFILE%\Qt") do (
         if not defined QT_DIR if exist "%%~r" (
             for /f "delims=" %%v in ('dir /b /ad /o-n "%%~r" 2^>nul') do (
-                if not defined QT_DIR for /f "delims=" %%q in ('dir /b /ad "%%~r\%%v\msvc*_64" 2^>nul') do set "QT_DIR=%%~r\%%v\%%q"
+                if not defined QT_DIR for /f "delims=" %%q in ('dir /b /ad "%%~r\%%v\!QKIT_GLOB!" 2^>nul') do set "QT_DIR=%%~r\%%v\%%q"
             )
         )
     )
@@ -131,10 +171,29 @@ if not defined QT_DIR (
 if not defined QT_DIR (
     echo [ERROR] Qt not found. Use  /qt ^<Qt dir^>  or set the QT_DIR env var,
     echo         e.g.  build.bat /qt C:\Qt\6.8.3\msvc2022_64
+    if /i "!TARGET_ARCH!"=="arm64" echo         ARM64 kit:  C:\Qt\6.8.3\msvc2022_arm64
     exit /b 1
 )
 if not exist "!QT_DIR!\lib\cmake\Qt6\Qt6Config.cmake" (
     echo [WARN] Qt6Config.cmake not found under !QT_DIR! - is that really a Qt dir?
+)
+
+rem ARM64 Qt packages ship no host tools (moc/uic/rcc/windeployqt): the Qt
+rem libraries are cross-compiled, so the tools that must RUN during the build
+rem stay on the x64 side. Point QT_HOST_PATH at the sibling x64 kit.
+set "QT_HOST_DIR="
+if /i "!TARGET_ARCH!"=="arm64" (
+    rem %%~dp on a quoted single item hands back only the drive ("C:"), so
+    rem resolve ".." with %%~f instead -- that normalises the path properly.
+    for %%p in ("!QT_DIR!\..") do set "QT_PARENT=%%~fp"
+    for /f "delims=" %%q in ('dir /b /ad "!QT_PARENT!\msvc*_64" 2^>nul') do (
+        if not defined QT_HOST_DIR if exist "!QT_PARENT!\%%q\lib\cmake\Qt6\Qt6Config.cmake" set "QT_HOST_DIR=!QT_PARENT!\%%q"
+    )
+    if not defined QT_HOST_DIR (
+        echo [ERROR] ARM64 kit needs an x64 Qt next to it ^(QT_HOST_PATH: moc/uic/rcc/windeployqt^).
+        echo         Install one, e.g.  C:\Qt\6.8.3\msvc2022_64
+        exit /b 1
+    )
 )
 
 rem ---------------------------------------------------------------- generator
@@ -166,13 +225,17 @@ if not defined CACHED_GEN if defined NINJA set "GEN_ARGS=-G Ninja -DCMAKE_BUILD_
 if not defined CACHED_GEN if defined NINJA set "CACHED_GEN=Ninja (new)"
 echo [2/4] Generator: !CACHED_GEN!
 echo        Qt     : !QT_DIR!
+if defined QT_HOST_DIR echo        Qt host: !QT_HOST_DIR!
 echo        fio    : !FIO_DIR!
+echo        arch   : !TARGET_ARCH!
 echo        cmake  : !CMAKE!
 
 rem ---------------------------------------------------------------- configure
 echo [3/4] CMake configure ...
 if not exist "!BUILD_DIR!" mkdir "!BUILD_DIR!"
-"!CMAKE!" -S "!ROOT!" -B "!BUILD_DIR!" !GEN_ARGS! -DCMAKE_PREFIX_PATH="!QT_DIR!" -DFIO_DIR="!FIO_DIR!"
+set "HOST_ARGS="
+if defined QT_HOST_DIR set "HOST_ARGS=-DQT_HOST_PATH="!QT_HOST_DIR!""
+"!CMAKE!" -S "!ROOT!" -B "!BUILD_DIR!" !GEN_ARGS! -DCMAKE_PREFIX_PATH="!QT_DIR!" !HOST_ARGS! -DFIO_DIR="!FIO_DIR!"
 if errorlevel 1 (
     echo.
     echo [ERROR] CMake configure failed.
@@ -233,7 +296,7 @@ if /i "!ACTION!"=="installer" (
     echo [installer] Compiling the Inno Setup installer ...
     set "PS=powershell.exe"
     for %%i in (pwsh.exe) do if not "%%~$PATH:i"=="" set "PS=%%~$PATH:i"
-    "!PS!" -NoProfile -ExecutionPolicy Bypass -File "!ROOT!\tools\make-installer.ps1"
+    "!PS!" -NoProfile -ExecutionPolicy Bypass -File "!ROOT!\tools\make-installer.ps1" -Arch !TARGET_ARCH!
     if errorlevel 1 (
         echo.
         echo [ERROR] Installer build failed. See the messages above.
@@ -245,11 +308,21 @@ if /i "!ACTION!"=="installer" (
 )
 
 if /i "!ACTION!"=="run" (
+    if /i "!TARGET_ARCH!"=="arm64" (
+        echo [ERROR] An ARM64 build cannot run on this x64 host.
+        echo         Copy  !BUILD_DIR!\dist  to an ARM64 Windows machine.
+        exit /b 1
+    )
     set "PATH=!QT_DIR!\bin;!PATH!"
     start "" "!EXE!"
 )
 
 if /i "!ACTION!"=="selftest" (
+    if /i "!TARGET_ARCH!"=="arm64" (
+        echo [ERROR] selftest must run on the target machine - an ARM64 build
+        echo         cannot run on this x64 host.
+        exit /b 1
+    )
     if "!SELFTEST_TARGET!"=="" (
         echo.
         echo [ERROR] selftest needs a target volume, e.g.:  build.bat selftest /target G:
@@ -442,6 +515,10 @@ echo.
 echo  Options:
 echo    /qt ^<dir^>        Qt directory, e.g. C:\Qt\6.8.3\msvc2022_64
 echo                      (or set the QT_DIR environment variable)
+echo    /arch ^<x64^|arm64^> target architecture, default x64. arm64 is a cross
+echo                      build into build-arm64\ ; it needs the MSVC ARM64
+echo                      build tools plus an ARM64 Qt kit next to the x64 one
+echo                      (moc/uic/windeployqt come from the x64 kit)
 echo    /vs ^<dir^>        Visual Studio install dir (default: found via vswhere)
 echo    /target ^<vol^>    selftest target volume, e.g. G: or G:/
 echo    /filllimit ^<MiB^> selftest fill limit, default 1000 (filling a real
@@ -458,12 +535,14 @@ echo    build.bat check                              repo hygiene check
 echo    build.bat git /message "first commit"        init + commit
 echo    build.bat selftest /target G: /filllimit 3000
 echo    build.bat /qt C:\Qt\6.8.3\msvc2022_64        pick Qt explicitly
+echo    build.bat package /arch arm64                cross build for Windows ARM64
 echo.
 echo  Note: cmd splits arguments on "=", so /qt=X and /qt X are equivalent.
 echo.
 echo  Requirements:
 echo   - Visual Studio with the "Desktop development with C++" workload
 echo   - Qt 6.5+ (Widgets + Charts), MSVC x64 build
+echo     (plus msvc*_arm64 kit + ARM64 build tools for /arch arm64)
 echo   - CMake 3.21+
 echo   - Inno Setup 6, only for the installer action:
 echo       winget install --id JRSoftware.InnoSetup --exact

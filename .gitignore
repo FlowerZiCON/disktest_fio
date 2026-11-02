@@ -4,6 +4,8 @@ build/
 Release/
 # Linux 上另开一个构建目录时会用到（见 README「Linux」一节）
 build-linux/
+# Windows ARM64 交叉构建（build.bat package /arch arm64）
+build-arm64/
 
 # 本地联调用的 SSH 私钥（连测试机用），绝不入库
 .ssh/
@@ -41,3 +43,8 @@ ml_disktest-data*.csv
 *.lib
 *.exe
 !third_party/fio/fio.exe
+# Windows ARM64 版 fio（同版本 3.43 源码自己交叉编的；上游不发 ARM64 构建）。
+# 少了它，ARM64 包就只能退回 x64 那份，靠模拟层跑 —— 测出来的数不可信。
+!third_party/fio/fio-arm64.exe
+
+armpe/

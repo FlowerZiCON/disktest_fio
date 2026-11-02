@@ -35,6 +35,8 @@
 ## 快速开始
 
 1. **下载发布包**：安装版直接运行 `disktest-<版本>-setup.exe`；绿色版解压到任意目录（路径带中文也没问题）。
+   Windows 上有 **x64** 和 **ARM64** 两种，文件名里分别是 `win64` / `win-arm64` ——
+   ARM 版 Windows（骁龙本之类）请选 `win-arm64`，那是原生编译的，不经过 x64 模拟层。
 2. 双击 **`disktest.exe`**（安装版也可以从开始菜单启动）。
 3. 如果你的电脑没有安装Qt运行时和fio，那你需要下载全量包，如果环境满足可以只下载本体。
 4. 在左侧「选择磁盘」列表里展开一块盘，**单击选中它下面的那个分区**（文件系统）。
@@ -166,6 +168,16 @@ build.bat package
 ```
 
 生成的 `build\dist` 整个目录拷到目标机器双击即可运行。`build.bat help` 有全部用法。
+
+要出 **Windows ARM64** 包（在 x64 机器上交叉编译，产物在 `build-arm64\`）：
+
+```bat
+build.bat package /arch arm64
+build.bat installer /arch arm64
+```
+
+需要额外装 **MSVC 的 ARM64 生成工具**和一份 **ARM64 的 Qt**（两边都不带 host 工具，
+moc/windeployqt 用的是 x64 那份），细节见 [docs/readme.md](docs/readme.md)。
 想要**可安装的 `setup.exe`**（开始菜单快捷方式、卸载程序，可选「所有用户 / 仅当前用户」）：
 
 ```bat

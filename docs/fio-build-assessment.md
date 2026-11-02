@@ -87,3 +87,47 @@ bash build-fio-mingw.sh        # 产物：fio_src/fio.exe（6,172,549 B，fio-3.
 - `fio_src\` 里现在有构建产物（`config-host.mak`、`config-host.h`、约 116 个 `.o`、`FIO-VERSION-FILE`、`fio.exe`、`t/*.exe`）；`git status` 仍然干净（生成物都在忽略列表里）。要还原成纯源码：`make clean`，或 `git clean -xdf`（后者会连 `fio.exe` 一起删）。
 - `_probe\` 下是本次的探针脚本与日志（`build_mingw*.sh/.log`、`cg.c`、`opentest.c`、`cftest.c` 等），可以直接整个删掉。
 - 没有修改 fio 的任何源码；`build-fio-mingw.sh` 通过命令行变量传参，不落补丁到仓库。
+
+---
+
+## 8. 后记：Windows ARM64 版 fio（2026-11-02 已编出并随包分发）
+
+上面的评估只覆盖了 **x64**。做 ARM64 包时发现上游**根本不发 Windows ARM64 构建**，
+而 ARM64 包塞 x64 的 fio 会被 x64 模拟层跑起来 —— 什么错都不报，但这是测磁盘性能的
+工具，模拟层的开销会让测出来的数字没有意义。于是自己编了一份：
+
+| 项目 | 值 |
+| --- | --- |
+| 文件 | `third_party/fio/fio-arm64.exe`（打包时改名为 `fio/fio.exe`） |
+| 版本 | 3.43（与 x64 那份同一标签，源码未改动） |
+| PE | PE32+，Machine = ARM64 (0xAA64)，Subsystem = Windows CUI |
+| 依赖 | 仅系统 DLL（WS2_32 / ADVAPI32 / KERNEL32 / api-ms-win-crt-*），**无 libwinpthread-1.dll** |
+| 工具链 | llvm-mingw 20261020（clang 23.1.4），target `aarch64-w64-windows-gnu` |
+
+配方（Git Bash 里跑）：
+
+```sh
+export PATH="<llvm-mingw>/bin:/c/mingw64/bin:$PATH"
+export CC=aarch64-w64-mingw32-clang
+cd fio && rm -f *.d */*.d */*/*.d
+LDFLAGS="-lpthread" ./configure --cpu=arm64 --disable-lex --disable-native
+make -j8
+```
+
+与 x64 那次的差别（**注意，坑不一样**）：
+
+- **fio 的 `configure` 不支持 `--host` / `--build`**（带了直接打印用法、exit 1）。
+  它靠自己问编译器判断目标 OS/CPU（`_WIN32` → `targetos=CYGWIN`），
+  所以只要 `CC` 指向交叉编译器，用 `--cpu=arm64` 显式指定架构即可。
+- **这次不需要 libssp stub**：llvm-mingw 这条路没有触发 `-lssp`（与 MinGW-Builds 不同）。
+- `CONFIG_32BIT=y` 仍然是对的（Windows 是 LLP64，`long` 只有 4 字节）。
+- 编译时有 5 条 `-Wasm-operand-widths`，都在 `arch/arch-aarch64.h` 的 `arch_ffz()`：
+  那段内联汇编按 Linux 的 "long=64 位" 写，而 Windows 的 `unsigned long` 是 32 位，
+  生成的是 `rbit x11, x10` / `clz x10, x11` 这类 64 位指令。**已确认安全**：
+  `clz` 数的是 x11 的高 32 位，正好来自 x10 低 32 位（真实值）的位反转，
+  高 32 位的垃圾不影响结果；全 1 的边界在汇编前由 `cbz w10` 拦掉。
+  （`arch_ffz` 被 `smalloc.c` 和 `axmap.c` 用，属核心路径，所以这条特意查过。）
+- Windows 上 `--enghelp` 的 17 个引擎与 x64 官方版一致；`crc32c` 的硬件加速探测
+  只在 `__linux__`/`__APPLE__` 下成立，所以 ARM64 Windows 走的是**软件查表法**——
+  功能正确，只是校验环节略慢。
+

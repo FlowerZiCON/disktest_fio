@@ -41,6 +41,12 @@ Qt 的版权归 The Qt Company Ltd. 及相关贡献者所有。
 | 许可证全文 | [`licenses/fio-GPLv2.txt`](fio-GPLv2.txt) |
 | 上游版权文件 | [`third_party/fio/COPYING.txt`](../third_party/fio/COPYING.txt) |
 
+**Windows ARM64 包里的 fio 是本项目自己编译的**：上游只为 Windows 发布 x64 构建，
+没有 ARM64 版本。所以 ARM64 包内那份 fio（`third_party/fio/fio-arm64.exe`）由本项目
+用上表指定的 **3.43 版源码**（`git clone --branch fio-3.43`，未做任何改动）配合
+llvm-mingw 交叉编译得到；GPL-2.0 第 3 条要求的"完整对应源码"依然可以按该版本号
+从上游仓库取得。x64 包里那份 `fio.exe` 仍是上游官方 release 产物，未改动。
+
 **为什么本程序可以自选许可证**：fio 是以**独立进程**方式调用的，本程序既不
 链接 fio 的代码、也不包含其头文件，因此两者构成 GPL 所说的"聚合"（mere
 aggregation）而非"衍生作品"。本程序自身代码不因此受 GPL-2.0 约束。

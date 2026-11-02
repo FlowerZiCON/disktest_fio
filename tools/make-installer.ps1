@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     把 build\dist 打成一个可安装的 setup.exe（Inno Setup）。
@@ -28,9 +28,15 @@
     顺手打一个绿色版 zip（build\installer\disktest-<版本>-portable.zip），
     内容就是 build\dist。
 
+.PARAMETER Arch
+    目标架构：x64（默认）或 arm64。arm64 读 build-arm64\dist、产物写到
+    build-arm64\installer\ 并加 -arm64 后缀；安装脚本里 ArchitecturesAllowed
+    也随之变成 arm64（需要 Inno Setup 6.3+）。
+
 .EXAMPLE
     pwsh tools\make-installer.ps1
     pwsh tools\make-installer.ps1 -PortableZip
+    pwsh tools\make-installer.ps1 -Arch arm64
     build.bat installer          # 全量重建 + package + 安装包，一条命令
 #>
 [CmdletBinding()]
@@ -39,6 +45,7 @@ param(
     [string]$DistDir,
     [string]$OutDir,
     [string]$Iscc,
+    [string]$Arch = 'x64',
     [switch]$PortableZip
 )
 
@@ -46,8 +53,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $DistDir) { $DistDir = Join-Path $RepoRoot 'build\dist' }
-if (-not $OutDir)  { $OutDir  = Join-Path $RepoRoot 'build\installer' }
+# 架构决定三件事：读哪个 dist、写到哪、安装脚本允许在哪些机器上装。
+switch ($Arch) {
+    'x64'   { $BuildRoot = 'build';       $AppArch = 'x64compatible'; $ArchSuffix = '' }
+    'arm64' { $BuildRoot = 'build-arm64'; $AppArch = 'arm64';         $ArchSuffix = '-arm64' }
+    default { throw "不认识的 -Arch '$Arch'（只支持 x64 / arm64）。" }
+}
+if (-not $DistDir) { $DistDir = Join-Path $RepoRoot "$BuildRoot\dist" }
+if (-not $OutDir)  { $OutDir  = Join-Path $RepoRoot "$BuildRoot\installer" }
 $IssPath = Join-Path $RepoRoot 'installer\disktest.iss'
 
 function Write-Step([string]$Text) { Write-Host "[installer] $Text" }
@@ -149,7 +162,18 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDi
 Write-Step "编译 $IssPath ..."
 Push-Location $RepoRoot
 try {
-    & $IsccExe "/DMyAppVersion=$Version" '/Qp' $IssPath
+    # dist / 输出目录按架构传：ARM64 的产物在 build-arm64\ 下，安装脚本里
+    # 写死的 ..\build\ 会让 ARM64 包去读 x64 的 dist（打出来能装、装上起不来）。
+    $isccArgs = @(
+        "/DMyAppVersion=$Version"
+        "/DAppArch=$AppArch"
+        "/DDistDir=..\$BuildRoot\dist"
+        "/DOutputDir=..\$BuildRoot\installer"
+    )
+    if ($ArchSuffix) { $isccArgs += "/DArchSuffix=$ArchSuffix" }
+    $isccArgs += '/Qp'
+    $isccArgs += $IssPath
+    & $IsccExe @isccArgs
     $isccExit = $LASTEXITCODE
 } finally {
     Pop-Location
@@ -158,7 +182,7 @@ if ($isccExit -ne 0) {
     throw "ISCC 失败（退出码 $isccExit）。上面的输出里有具体是哪一行。"
 }
 
-$SetupPath = Join-Path $OutDir "disktest-$Version-setup.exe"
+$SetupPath = Join-Path $OutDir "disktest-$Version$ArchSuffix-setup.exe"
 if (-not (Test-Path $SetupPath)) {
     throw "ISCC 报告成功，但没找到 $SetupPath —— 检查 disktest.iss 的 OutputDir/OutputBaseFilename。"
 }
@@ -183,7 +207,7 @@ Write-Host "  SHA256: $hash"
 
 # ---------------------------------------------------------------- 绿色版 zip（可选）
 if ($PortableZip) {
-    $zipPath = Join-Path $OutDir "disktest-$Version-portable.zip"
+    $zipPath = Join-Path $OutDir "disktest-$Version$ArchSuffix-portable.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Write-Step "打绿色版 zip ..."
     Compress-Archive -Path (Join-Path $DistDir '*') -DestinationPath $zipPath -CompressionLevel Optimal

@@ -3,10 +3,14 @@
 ;
 ;  用法（通常由 tools\make-installer.ps1 或 build.bat installer 调用）：
 ;      ISCC.exe /DMyAppVersion=<版本> installer\disktest.iss
+;      ARM64 包另外传 /DAppArch=arm64 /DArchSuffix=-arm64
+;               /DDistDir=..\build-arm64\dist /DOutputDir=..\build-arm64\installer
 ;
 ;  输入  ..\build\dist        build.bat package 的产物
 ;                             （disktest.exe + Qt DLL + 平台插件 + fio + 许可证）
+;                             ARM64 包为 ..\build-arm64\dist
 ;  输出  ..\build\installer\disktest-<版本>-setup.exe
+;        ARM64 包为 ..\build-arm64\installer\disktest-<版本>-arm64-setup.exe
 ;
 ;  安装范围由向导里的「为谁安装」页选择：
 ;      所有用户    → {autopf}\Disktest                       需要一次 UAC 提权
@@ -28,7 +32,24 @@
 ; AppId 一旦发布就不能再改：Windows 靠它认出「这是同一个程序的另一个版本」，
 ; 改了会变成两个程序、旧版卸不掉。{{ 是 Inno 里表示字面量 { 的转义。
 #define MyAppId "{{9F2C6B14-7A3D-4E58-B0C9-1D6E8F4A2B73}"
-#define DistDir "..\build\dist"
+; 目标架构：x64 包 = x64compatible（ARM64 机器上的 x64 模拟层也算），
+; ARM64 原生包 = arm64。由 make-installer.ps1 用 /D 传进来。
+#ifndef AppArch
+  #define AppArch "x64compatible"
+#endif
+; 安装包文件名后缀：x64 包不带（沿用 disktest-<版本>-setup.exe），
+; ARM64 包加 -arm64，两种包可以并存在同一个目录里。
+#ifndef ArchSuffix
+  #define ArchSuffix ""
+#endif
+; dist 与输出目录也由 /D 传入：ARM64 的产物在 build-arm64\ 下，
+; 写死 ..\build\ 会让 ARM64 安装包去读 x64 的 dist。
+#ifndef DistDir
+  #define DistDir "..\build\dist"
+#endif
+#ifndef OutputDir
+  #define OutputDir "..\build\installer"
+#endif
 
 ; 编译期就把「dist 不在」挡下来，否则打出来的是个只有许可证的空包。
 #if !FileExists(AddBackslash(SourcePath) + DistDir + "\" + MyAppExeName)
@@ -56,17 +77,17 @@ LicenseFile=..\LICENSE
 ; InfoBeforeFile 在编译期只能写一个文件，而三种界面语言各有一份；
 ; 所以这里先放简体那份把页面建出来，运行时在 [Code] 里按实际语言换成对应的。
 InfoBeforeFile=preinstall.zh-CN.txt
-OutputDir=..\build\installer
-OutputBaseFilename=disktest-{#MyAppVersion}-setup
+OutputDir={#OutputDir}
+OutputBaseFilename=disktest-{#MyAppVersion}{#ArchSuffix}-setup
 SetupIconFile=..\resources\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={cm:AppShortcutName} {#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; 程序是 x64 的 Qt 6.8 构建，最低 Windows 10 1809（17763）—— Qt 6.8 的下限。
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; 目标架构由 /DAppArch 传入（见文件头）。最低 Windows 10 1809（17763）—— Qt 6.8 的下限。
+ArchitecturesAllowed={#AppArch}
+ArchitecturesInstallIn64BitMode={#AppArch}
 MinVersion=10.0.17763
 ; 默认不要求管理员：向导会询问「为所有用户」还是「仅为我」，
 ; 选了所有用户才重启一次并走 UAC。命令行用 /ALLUSERS 或 /CURRENTUSER 直接指定。

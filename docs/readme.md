@@ -747,6 +747,7 @@ build.bat package                            全量重建 + 打包到 build\dist
 build.bat installer                          全量重建 + 打包 + 编译安装包 setup.exe
 build.bat run                                全量重建后启动程序
 build.bat selftest /target G: /filllimit 3000  全量重建 + 跑一轮无人值守自检
+build.bat package /arch arm64                Windows ARM64 交叉构建（产物在 build-arm64\）
 build.bat help                               全部用法
 ```
 
@@ -802,8 +803,8 @@ touch src/uitext.h && cmake --build build
 
 | 找什么 | 怎么找 |
 | --- | --- |
-| MSVC | `vswhere` 定位 Visual Studio，调它的 `vcvars64.bat`（也可 `/vs <目录>`） |
-| Qt | `/qt <目录>` > 环境变量 `QT_DIR` > 扫 `C:\Qt` `D:\Qt` `%USERPROFILE%\Qt` 下的 `msvc*_64` |
+| MSVC | `vswhere` 定位 Visual Studio，调它的 `vcvars64.bat`（也可 `/vs <目录>`）；`/arch arm64` 时改调 `vcvarsall.bat amd64_arm64` |
+| Qt | `/qt <目录>` > 环境变量 `QT_DIR` > 扫 `C:\Qt` `D:\Qt` `%USERPROFILE%\Qt` 下的 `msvc*_64`（`/arch arm64` 时扫 `msvc*_arm64*`，并自动把同级的 x64 kit 当 `QT_HOST_PATH`） |
 | CMake | PATH > `C:\Program Files\CMake\bin` |
 | 生成器 | 已有 `build\` 就沿用里面记着的；否则有 Ninja 用 Ninja，没有就用 CMake 默认的 VS 生成器 |
 
@@ -834,8 +835,8 @@ dist/
   Qt6Core/Gui/Widgets/Charts/... .dll
   platforms/qwindows.dll      平台插件（少了它 Qt 起不来）
   styles/ imageformats/ iconengines/ networkinformation/ tls/ generic/
-  vcruntime140.dll  msvcp140.dll  ...   10 个 MSVC 运行库
-  fio/fio.exe                 官方 fio 3.43，程序会就近找到它
+  vcruntime140.dll  msvcp140.dll  ...   10 个 MSVC 运行库（ARM64 包是 9 个）
+  fio/fio.exe                 官方 fio 3.43，程序会就近找到它（ARM64 包是同版本自编的 ARM64 fio）
   README.md
 ```
 
@@ -846,6 +847,62 @@ Qt 是 `/MD` 构建的，所以本程序必须跟着动态链接 CRT（不能静
 自足性验证：把 `dist` 拷到工作区外的临时目录，用
 `PATH=C:\WINDOWS\system32;C:\WINDOWS`（完全不含 Qt）启动，跑完整测试 PASS；
 并用 `dumpbin /dependents` 扫过包里全部二进制，被引用的 MSVC 运行库**缺失 0 个**。
+
+### Windows ARM64（在 x64 机器上交叉编译）
+
+**可行，已实测**：2026-11-02 在本机编出 ARM64 包，并在真实 ARM64 机器上跑通。
+
+```bat
+build.bat package /arch arm64        :: 产物在 build-arm64\dist
+build.bat installer /arch arm64      :: 再加安装包 + 绿色版 zip
+```
+
+需要两样东西，缺一不可：
+
+| 需要什么 | 怎么装 | 装完的标志 |
+| --- | --- | --- |
+| MSVC 的 ARM64 生成工具 | VS Installer 勾「MSVC v14x - ARM64/ARM64EC 生成工具」，或命令行 `vs_installer.exe modify --installPath "<VS目录>" --add Microsoft.VisualStudio.Component.VC.14.51.ARM64`（组件 ID 别靠猜，去 `C:\ProgramData\Microsoft\VisualStudio\Packages\_Channels\<id>\catalog.json` 里查） | `VC\Tools\MSVC\<ver>\bin\Hostx64\arm64\cl.exe` 存在 |
+| ARM64 的 Qt | `aqt install-qt windows desktop 6.8.3 win64_msvc2022_arm64_cross_compiled -O C:\Qt --modules qtcharts` | `C:\Qt\6.8.3\msvc2022_arm64\lib\cmake\Qt6\Qt6Config.cmake` |
+
+**四个必须知道的坑**（都实测踩过）：
+
+1. **ARM64 的 Qt 包不带 host 工具。** 它 `bin\` 里的 exe 全是 ARM64、x64 机器跑不了，
+   而且**没有 moc/uic/rcc/windeployqt**。交叉编译必须 `-DQT_HOST_PATH` 指向旁边那份
+   x64 kit —— `build.bat /arch arm64` 会自动找同级目录下的 `msvc*_64`。
+2. **`vcvarsamd64_arm64.bat` 可能不存在。** 只装「版本化的 ARM64 组件」时它不会生成；
+   但 `vcvarsall.bat` 支持 `amd64_arm64`，脚本会退到它。
+3. **windeployqt 会静默拷错架构。** CMake 找到的 `Qt6::windeployqt` 是 host kit 的 x64 版，
+   它默认部署「自己那份 Qt」的 DLL —— ARM64 包会被塞进一堆 x64 的 Qt DLL，
+   编译打包全程不报错，只在目标机上崩。正解是加 `--qtpaths <目标Qt>\bin\qtpaths6.bat`
+   （aqt 装的包自带这个 wrapper，`target_qt.conf` 里写着 `TargetSpec=win32-arm64-msvc`）。
+   CMakeLists 已按目标架构自动加上。
+4. **VS 的 `Redist\...\arm64` 目录里混着一个 x64 的 `vcruntime140_1.dll`**（那是
+   x64/ARM64EC 专用的异常处理辅助库，ARM64 程序不导入它）。所以运行库不是按文件名
+   挑的，而是按 PE 头的 Machine 字段过滤；**fio 也一样按 PE 头选** —— ARM64 包自动用
+   `third_party/fio/fio-arm64.exe`。
+
+架构判据本身也有坑：**不能用 `CMAKE_SYSTEM_PROCESSOR`**。用 Ninja 交叉编译时它拿到的
+还是宿主机的 `AMD64`（甚至为空），要读 MSVC 探测出来的
+`CMAKE_CXX_COMPILER_ARCHITECTURE_ID`。
+
+**ARM64 的 fio 从哪来**：上游不发 Windows ARM64 构建。`third_party/fio/fio-arm64.exe`
+是用**同一个 3.43 源码**（未改动）配合 llvm-mingw（target `aarch64-w64-windows-gnu`）
+交叉编的，只依赖系统 DLL（不拖 `libwinpthread-1.dll`）。编译命令与已知的
+`-Wasm-operand-widths` 警告分析见 THIRD-PARTY-NOTICES.md 与
+`docs/fio-build-assessment.md`。
+
+产物与 x64 并存、互不覆盖：
+
+```
+build-arm64\dist\                                    绿色目录（全 ARM64，32 个二进制）
+build-arm64\installer\disktest-<版本>-arm64-setup.exe
+build-arm64\installer\disktest-<版本>-arm64-portable.zip
+```
+
+`build-arm64\` 已在 `.gitignore` 里。**ARM64 包在 x64 机器上起不来**，所以
+`build.bat run /arch arm64` 和 `selftest /arch arm64` 会直接拒绝并提示；
+验证必须拿到 ARM64 机器上做。
+
 ### 做安装包（Inno Setup 6）
 
 `build.bat package` 产出的是绿色目录，`build.bat installer` 再把它包成一个可安装的 `setup.exe`：

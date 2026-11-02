@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(disktest
-    VERSION 3.0.8
+    VERSION 3.1.0
     DESCRIPTION "Qt + fio disk reliability and performance tester GUI"
     LANGUAGES CXX)
 
@@ -94,10 +94,25 @@ if(WIN32)
 
     # 这是哪一份包 —— 和 src/uitext.h 的 DISKTEST_ARCH 回答同一个问题，
     # 报问题、对着 release 页挑包时，看一眼属性就知道。
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    #
+    # 判据取 MSVC 探测出来的目标架构（CMAKE_CXX_COMPILER_ARCHITECTURE_ID）：
+    # 用 Ninja 做 ARM64 交叉编译时 CMAKE_SYSTEM_PROCESSOR 拿到的还是宿主的
+    # AMD64（甚至干脆是空的），照它判断会把 ARM64 包标成 win64 —— 正好在
+    # 最需要区分的那一次撒谎。指针宽度也不够：ARM64 同样是 8 字节。
+    set(_target_arch "${CMAKE_SYSTEM_PROCESSOR}")
+    if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+        set(_target_arch "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+    endif()
+
+    if(_target_arch MATCHES "^(ARM64|ARM64EC|arm64|aarch64)$")
+        set(APP_ARCH "win-arm64")
+        set(APP_CRT_ARCH "arm64")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(APP_ARCH "win64")
+        set(APP_CRT_ARCH "x64")
     else()
         set(APP_ARCH "win32")
+        set(APP_CRT_ARCH "x86")
     endif()
     set(APP_COMMENTS "基于 fio 的磁盘可靠性测试 GUI（${APP_ARCH}）；源码 ${APP_HOMEPAGE}")
 
@@ -165,6 +180,21 @@ set(DIST_DIR "${CMAKE_BINARY_DIR}/dist")
 # Qt 是 /MD 构建的，本程序必须跟着动态链接 MSVC 运行库，所以目标机器上没有
 # VC++ 运行库时就得把这些 DLL 一起带上。windeployqt 在本机找不到它们
 # （拷完之后 dist 里只有 Qt 的 DLL），所以直接从 VC 安装目录的 Redist 里取。
+# 读 PE 头的 Machine 字段（0xAA64=ARM64 / 0x8664=x64 / 0x014C=x86），
+# 返回原始字节的十六进制串（"64aa" 这种）。CMake 没有现成的 PE 解析，
+# 但打包时"库里混进另一个架构"的代价太大，值得按字节读一次。
+function(disktest_pe_machine path out_var)
+    file(READ "${path}" _lfanew OFFSET 60 LIMIT 4 HEX)   # DOS 头里的 e_lfanew（小端）
+    string(SUBSTRING "${_lfanew}" 0 2 _b0)
+    string(SUBSTRING "${_lfanew}" 2 2 _b1)
+    string(SUBSTRING "${_lfanew}" 4 2 _b2)
+    string(SUBSTRING "${_lfanew}" 6 2 _b3)
+    math(EXPR _pe_off "0x${_b0} + 0x${_b1}*256 + 0x${_b2}*65536 + 0x${_b3}*16777216")
+    math(EXPR _mach_off "${_pe_off} + 4")                # PE 签名 4 字节之后
+    file(READ "${path}" _mach OFFSET ${_mach_off} LIMIT 2 HEX)
+    set(${out_var} "${_mach}" PARENT_SCOPE)
+endfunction()
+
 set(MSVC_CRT_DLLS "")
 if(MSVC)
     # cl.exe 位于 <VC>/Tools/MSVC/<版本>/bin/Host<x64>/x64/cl.exe
@@ -178,27 +208,88 @@ if(MSVC)
     get_filename_component(_vc_root "${_tools_dir}" DIRECTORY)          # .../VC
     get_filename_component(_msvc_ver "${_msvc_ver_dir}" NAME)           # 例如 14.51.36231
 
+    # Redist 目录按目标架构分（x64 / arm64），写死 x64 会让 ARM64 包拿不到
+    # 运行库、或者悄悄带上一个跑不起来的 x64 运行库。
     file(GLOB MSVC_CRT_DLLS
-         "${_vc_root}/Redist/MSVC/${_msvc_ver}/x64/Microsoft.VC*.CRT/*.dll")
+         "${_vc_root}/Redist/MSVC/${_msvc_ver}/${APP_CRT_ARCH}/Microsoft.VC*.CRT/*.dll")
     if(NOT MSVC_CRT_DLLS)
         file(GLOB MSVC_CRT_DLLS
-             "${_vc_root}/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll")
+             "${_vc_root}/Redist/MSVC/*/${APP_CRT_ARCH}/Microsoft.VC*.CRT/*.dll")
     endif()
+    # VS 的 arm64 Redist 目录里本身就混着一个 x64 的 vcruntime140_1.dll
+    # （那是 x64/ARM64EC 专用的异常处理辅助库，ARM64 程序并不导入它）。
+    # 所以不能只按文件名信任：按 PE 头过滤，架构对不上的不往包里放。
+    # 这种库混进包里的后果是"打包成功、拷走正常、目标机上一启动就崩"。
+    if(APP_CRT_ARCH STREQUAL "arm64")
+        set(_want_machine "64aa")
+    elseif(APP_CRT_ARCH STREQUAL "x64")
+        set(_want_machine "6486")
+    else()
+        set(_want_machine "4c01")
+    endif()
+    set(_crt_kept "")
+    foreach(_dll ${MSVC_CRT_DLLS})
+        disktest_pe_machine("${_dll}" _m)
+        if("${_m}" STREQUAL "${_want_machine}")
+            list(APPEND _crt_kept "${_dll}")
+        else()
+            message(STATUS "  跳过架构不匹配的运行库：${_dll}（PE Machine=0x${_m}）")
+        endif()
+    endforeach()
+    set(MSVC_CRT_DLLS "${_crt_kept}")
+
     list(LENGTH MSVC_CRT_DLLS _crt_count)
     if(_crt_count GREATER 0)
-        message(STATUS "打包时将附上 ${_crt_count} 个 MSVC 运行库 DLL（${_vc_root}/Redist/MSVC/${_msvc_ver}/x64）")
+        message(STATUS "打包时将附上 ${_crt_count} 个 MSVC 运行库 DLL（${_vc_root}/Redist/MSVC/${_msvc_ver}/${APP_CRT_ARCH}）")
     else()
-        message(WARNING "没找到 MSVC 运行库 Redist（查过 ${_vc_root}/Redist/MSVC/${_msvc_ver}/x64）；"
+        message(WARNING "没找到 MSVC 运行库 Redist（查过 ${_vc_root}/Redist/MSVC/${_msvc_ver}/${APP_CRT_ARCH}）；"
                         "打包产物在没有 VC++ 运行库的机器上可能起不来")
     endif()
 endif()
 
-# 随包发布的那份 fio。Windows 上是仓库里带的 fio.exe，Linux 上一般直接用
-# 发行版的 fio（本仓库 third_party/fio 里放的是 Windows 构建，Linux 上跑不了），
-# 找不到就不附 —— 程序会自己去 PATH 上找。
-set(_fio_binary "${FIO_DIR}/${FIO_EXE_NAME}")
+# 随包发布的那份 fio。Windows 上有两份：x64 的 fio.exe（上游官方 release）和
+# ARM64 的 fio-arm64.exe（同一版本 3.43 源码、用 llvm-mingw 自己交叉编的，
+# 因为上游不发 Windows ARM64 构建）。Linux 上一般直接用发行版的 fio
+# （本仓库 third_party/fio 里放的是 Windows 构建，Linux 上跑不了）。
+#
+# 选哪份不能看文件名，要看 PE 头：ARM64 包塞进 x64 的 fio，Windows 11 能用
+# x64 模拟层把它跑起来 —— 什么都不报错，但这工具是测磁盘性能的，模拟层的
+# 开销会让测出来的数字没有意义。所以这里按目标架构核对 Machine 字段。
 set(PACKAGE_FIO_COMMANDS "")
-if(EXISTS "${_fio_binary}")
+set(_fio_binary "")
+if(WIN32)
+    if(APP_CRT_ARCH STREQUAL "arm64")
+        set(_want_fio_machine "64aa")
+        set(_fio_candidates "${FIO_DIR}/fio-arm64.exe" "${FIO_DIR}/${FIO_EXE_NAME}")
+    elseif(APP_CRT_ARCH STREQUAL "x64")
+        set(_want_fio_machine "6486")
+        set(_fio_candidates "${FIO_DIR}/${FIO_EXE_NAME}")
+    else()
+        set(_want_fio_machine "4c01")
+        set(_fio_candidates "${FIO_DIR}/${FIO_EXE_NAME}")
+    endif()
+    foreach(_cand ${_fio_candidates})
+        if(NOT _fio_binary AND EXISTS "${_cand}")
+            disktest_pe_machine("${_cand}" _fm)
+            if("${_fm}" STREQUAL "${_want_fio_machine}")
+                set(_fio_binary "${_cand}")
+            else()
+                message(STATUS "  跳过架构不匹配的 fio：${_cand}（PE Machine=0x${_fm}）")
+            endif()
+        endif()
+    endforeach()
+    if(NOT _fio_binary)
+        message(WARNING "没有与 ${APP_ARCH} 匹配的 fio：这个包不带 fio，程序会去 PATH 上找")
+    endif()
+else()
+    # Linux：仓库里那份是 Windows 构建，别拿它冒充；有就带上，没有就算了
+    if(EXISTS "${FIO_DIR}/${FIO_EXE_NAME}")
+        set(_fio_binary "${FIO_DIR}/${FIO_EXE_NAME}")
+    endif()
+endif()
+
+if(_fio_binary AND EXISTS "${_fio_binary}")
+    message(STATUS "打包时附带的 fio：${_fio_binary}（目标架构 ${APP_ARCH}）")
     # 只带 fio 可执行文件 + 许可证/说明；上游的 examples/ 不随包发布
     # （55 个样例 .fio 文件，程序一个都不读）
     set(PACKAGE_FIO_COMMANDS
@@ -210,7 +301,28 @@ if(EXISTS "${_fio_binary}")
                 "${FIO_DIR}/README.txt" "${FIO_DIR}/HOWTO.txt"
                 "${FIO_DIR}/REPORTING-BUGS.txt" "${DIST_DIR}/fio/")
 else()
-    message(STATUS "没找到 ${_fio_binary}：打包时不附 fio，程序会去 PATH 上找")
+    message(STATUS "没有可用的 fio：打包时不附，程序会去 PATH 上找")
+endif()
+
+# 交叉编译（x64 主机 → ARM64 目标）时，windeployqt 只能是主机那份 Qt 里的
+# （目标 Qt 包不带 host 工具），而它默认去拷「自己那份 Qt」的 DLL —— ARM64 包
+# 会被塞进一堆 x64 的 Qt DLL：打包过程一声不吭，目标机上一启动就崩。
+# --qtpaths 指向目标 Qt 的 qtpaths 包装之后，它才会按 ARM64 去拷。
+# aqtinstall / 官方交叉包都提供这样的包装脚本（qtpaths6.bat 之类）。
+set(QTDEPLOY_QT_PATHS "")
+if(WIN32 AND APP_ARCH STREQUAL "win-arm64")
+    get_filename_component(_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+    foreach(_qp qtpaths6.bat qtpaths.bat qtpaths6.exe qtpaths.exe)
+        if(EXISTS "${_qt_prefix}/bin/${_qp}")
+            set(QTDEPLOY_QT_PATHS --qtpaths "${_qt_prefix}/bin/${_qp}")
+            message(STATUS "ARM64 交叉部署：windeployqt 用 --qtpaths ${_qt_prefix}/bin/${_qp}")
+            break()
+        endif()
+    endforeach()
+    if(NOT QTDEPLOY_QT_PATHS)
+        message(WARNING "ARM64 交叉部署：没找到目标 Qt 的 qtpaths 包装，"
+                        "windeployqt 可能拷进 x64 的 Qt DLL，包在 ARM64 上起不来")
+    endif()
 endif()
 
 if(TARGET Qt6::windeployqt)
@@ -218,7 +330,8 @@ if(TARGET Qt6::windeployqt)
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${DIST_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${DIST_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:disktest>" "${DIST_DIR}/"
-        COMMAND Qt6::windeployqt --release --no-translations --no-opengl-sw
+        COMMAND Qt6::windeployqt ${QTDEPLOY_QT_PATHS}
+                --release --no-translations --no-opengl-sw
                 --no-system-d3d-compiler "${DIST_DIR}/disktest.exe"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${MSVC_CRT_DLLS} "${DIST_DIR}/"
         ${PACKAGE_FIO_COMMANDS}
@@ -247,7 +360,8 @@ if(TARGET Qt6::windeployqt)
         VERBATIM)
 
     add_custom_target(deploy
-        COMMAND Qt6::windeployqt --release --no-translations --no-opengl-sw
+        COMMAND Qt6::windeployqt ${QTDEPLOY_QT_PATHS}
+                --release --no-translations --no-opengl-sw
                 --no-system-d3d-compiler "$<TARGET_FILE:disktest>"
         DEPENDS disktest
         COMMENT "windeployqt: 把 Qt 运行时拷到 exe 旁边")
