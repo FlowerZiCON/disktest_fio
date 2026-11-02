@@ -1,0 +1,30 @@
+# 行尾策略
+#
+# 背景：本仓库主要在 Windows 上开发（core.autocrlf=true），但里面有 Linux 脚本、
+# 也有必须保持 CRLF 的 .bat。只靠 core.autocrlf 会在一个地方出错：
+# **`git archive` 生成的源码包会把 .sh 也按 Windows 惯例转成 CRLF**，
+# 于是拿到源码包的人在 Linux 上跑 `installer/make-deb.sh` 会直接失败：
+#     /usr/bin/env: "bash\r": No such file or directory
+# 这份 .gitattributes 把两类文件钉死，与各自机器的 core.autocrlf 设置无关。
+
+# Linux 脚本：一律 LF。CRLF 会让 shebang 里的解释器路径带上 \r 而找不到。
+*.sh           text eol=lf
+
+# Windows 批处理：一律 CRLF。cmd 的解析器不接受纯 LF，
+# 会报出完全对不上号的 `& was unexpected at this time`。
+*.bat          text eol=crlf
+*.cmd          text eol=crlf
+
+# Inno Setup 脚本由 ISCC 读取，行尾不敏感，但保持与仓库一致
+*.iss          text eol=crlf
+
+# 二进制：不要做任何文本转换（也避免 diff 尝试按行比较）
+*.exe          binary
+*.ico          binary
+*.png          binary
+*.7z           binary
+*.gz           binary
+*.zip          binary
+*.deb          binary
+*.wim          binary
+*.iso          binary
