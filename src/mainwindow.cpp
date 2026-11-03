@@ -16,6 +16,7 @@
 #include "resultwindow.h"
 #include "rundata.h"
 #include "speedchart.h"
+#include "theme.h"
 #include "uitext.h"
 
 #include <QAbstractScrollArea>
@@ -24,6 +25,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QBrush>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
@@ -81,7 +83,9 @@
 namespace {
 
 /// 生成一张"标题 + 大字数值"的小卡片。
-QFrame *createCard(const QString &title, QLabel **valueLabel, const QColor &color, QWidget *parent)
+/// tone 是主题色调名（read / write / neutral），切换主题时按它重刷颜色。
+QFrame *createCard(const QString &title, QLabel **valueLabel, const QString &tone,
+                   QWidget *parent)
 {
     auto *frame = new QFrame(parent);
     frame->setFrameShape(QFrame::StyledPanel);
@@ -97,14 +101,18 @@ QFrame *createCard(const QString &title, QLabel **valueLabel, const QColor &colo
     QFont titleFont = titleLabel->font();
     titleFont.setPointSizeF(qMax(7.5, titleFont.pointSizeF() - 1.0));
     titleLabel->setFont(titleFont);
-    titleLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    titleLabel->setProperty("themeTone", QStringLiteral("muted"));
+    titleLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
 
     auto *value = new QLabel(QStringLiteral("--"), frame);
     QFont valueFont = value->font();
     valueFont.setPointSizeF(valueFont.pointSizeF() + 4.0);
     valueFont.setBold(true);
     value->setFont(valueFont);
-    value->setStyleSheet(QStringLiteral("color:%1;").arg(color.name()));
+    value->setProperty("themeTone", tone);
+    value->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::toneColor(tone).name()));
 
     layout->addWidget(titleLabel);
     layout->addWidget(value);
@@ -303,6 +311,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_runner, &FioRunner::verifyFailureRaised, this, &MainWindow::onVerifyFailure);
     connect(m_runner, &FioRunner::jobFinished, this, &MainWindow::onJobFinished);
 
+    // 系统运行中切换深浅色：重新套一遍本窗口里写死的颜色。
+    connect(theme::ThemeNotifier::instance(), &theme::ThemeNotifier::changed,
+            this, &MainWindow::applyTheme);
+
     setRunningState(false);
     updateStateLabel();
     onPlotStyleChanged();   // 按当前绘图方式决定"密度"那一组显不显示
@@ -379,9 +391,14 @@ void MainWindow::buildUi()
     const bool elevated = isProcessElevated();
     m_privilegeLabel->setText(elevated ? kModeElevated()
                                        : kModeNormal());
+    m_privilegeLabel->setProperty(
+        "themeTone", elevated ? QStringLiteral("success") : QStringLiteral("warning"));
+    m_privilegeLabel->setProperty("themeExtra", QStringLiteral("font-weight:bold; padding:0 6px;"));
     m_privilegeLabel->setStyleSheet(
-        elevated ? QStringLiteral("color:#1a7f37; font-weight:bold; padding:0 6px;")
-                 : QStringLiteral("color:#8a6d00; font-weight:bold; padding:0 6px;"));
+        elevated ? QStringLiteral("color:%1; font-weight:bold; padding:0 6px;")
+                       .arg(theme::successText().name())
+                 : QStringLiteral("color:%1; font-weight:bold; padding:0 6px;")
+                       .arg(theme::warningText().name()));
     m_privilegeLabel->setToolTip(
         elevated ? kModeElevatedTip()
                  : kModeNormalTip());
@@ -460,7 +477,9 @@ void MainWindow::buildParamPanel(QWidget *panel)
     loadForm->addRow(kLabelRwMode(), m_modeCombo);
 
     m_blockSizeLabel = new QLabel(loadBox);
-    m_blockSizeLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    m_blockSizeLabel->setProperty("themeTone", QStringLiteral("muted"));
+    m_blockSizeLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     loadForm->addRow(kLabelBlockSize(), m_blockSizeLabel);
 
     m_iodepthSpin = new QSpinBox(loadBox);
@@ -482,7 +501,8 @@ void MainWindow::buildParamPanel(QWidget *panel)
     // applyDetectedIoEngine() 在探测到 fio 之后填进来。
     m_ioModeLabel = new QLabel(
         kIoModeDirectFmt().arg(FioConfig::ioEngine()), loadBox);
-    m_ioModeLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    m_ioModeLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     m_ioModeLabel->setToolTip(kIoModeTip());
     loadForm->addRow(kLabelIoMode(), m_ioModeLabel);
 
@@ -520,7 +540,8 @@ void MainWindow::buildParamPanel(QWidget *panel)
 
     auto *hint = new QLabel(kParamHint(), panel);
     hint->setWordWrap(true);
-    hint->setStyleSheet(QStringLiteral("color:#666;"));
+    hint->setProperty("themeTone", QStringLiteral("muted"));
+    hint->setStyleSheet(QStringLiteral("color:%1;").arg(theme::mutedText().name()));
 
     // ---- 参数页：可靠性 / 性能，二选一 ----
     m_paramStack = new QStackedWidget(panel);
@@ -594,10 +615,8 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
     m_driveTree->setAlternatingRowColors(true);
     m_driveTree->setUniformRowHeights(true);
     m_driveTree->setMaximumHeight(170);
-    // 选中高亮改成浅蓝色（默认的系统高亮偏深，和交替行底色对比太强）
-    m_driveTree->setStyleSheet(QStringLiteral(
-        "QTreeWidget::item:selected { background: #cce8ff; color: #10314f; }"
-        "QTreeWidget::item:selected:active { background: #b6dcff; color: #10314f; }"));
+    // 深色下的选中高亮由 theme 决定；浅色沿用原来的浅蓝。
+    m_driveTree->setStyleSheet(theme::driveTreeStyleSheet());
     m_driveTree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
     // 185：去掉 "PhysicalDriveN" 前缀之后，第一列装的就是型号本身，
     // 实测常见型号（"Predator SSD GM7000 1TB" / "UMIS RPJYJ1T24MLR1HWY"）
@@ -616,11 +635,14 @@ void MainWindow::buildDrivePanel(QWidget *driveBox)
 
     m_targetLabel = new QLabel(driveBox);
     m_targetLabel->setWordWrap(true);
-    m_targetLabel->setStyleSheet(QStringLiteral("color:#333;"));
+    m_targetLabel->setProperty("themeTone", QStringLiteral("secondary"));
+    m_targetLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::secondaryText().name()));
 
     auto *hintRow = new QHBoxLayout;
     auto *hint = new QLabel(kDriveHintClick(), driveBox);
-    hint->setStyleSheet(QStringLiteral("color:#666;"));
+    hint->setProperty("themeTone", QStringLiteral("muted"));
+    hint->setStyleSheet(QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     hint->setWordWrap(true);
     auto *browse = new QPushButton(kBtnBrowseDir(), driveBox);
     browse->setToolTip(kDlgBrowseTargetHint().arg(FioConfig::folderName()));
@@ -651,17 +673,17 @@ QWidget *MainWindow::buildChartPanel()
     auto *cards = new QHBoxLayout;
     cards->setSpacing(4);
     cards->addWidget(createCard(kCardReadNow(), &m_readValueLabel,
-                                QColor(220, 30, 30), panel));
+                                QStringLiteral("read"), panel));
     cards->addWidget(createCard(kCardWriteNow(), &m_writeValueLabel,
-                                QColor(30, 70, 220), panel));
+                                QStringLiteral("write"), panel));
     cards->addWidget(createCard(kCardReadAvg(), &m_avgReadLabel,
-                                QColor(220, 30, 30), panel));
+                                QStringLiteral("read"), panel));
     cards->addWidget(createCard(kCardWriteAvg(), &m_avgWriteLabel,
-                                QColor(30, 70, 220), panel));
+                                QStringLiteral("write"), panel));
     cards->addWidget(createCard(kCardElapsed(), &m_elapsedLabel,
-                                QColor(60, 60, 60), panel));
+                                QStringLiteral("neutral"), panel));
     cards->addWidget(createCard(kCardState(), &m_stateLabel,
-                                QColor(60, 60, 60), panel));
+                                QStringLiteral("neutral"), panel));
     cards->addStretch(1);
 
     // ---- 校验失败的大字红色告警 ----
@@ -670,8 +692,9 @@ QWidget *MainWindow::buildChartPanel()
     // 可靠性测试里"这块盘坏了"是结论性的事件，不能只写进日志等用户去翻。
     m_verifyBanner = new QWidget(panel);
     m_verifyBanner->setObjectName(QStringLiteral("verifyBanner"));
-    m_verifyBanner->setStyleSheet(QStringLiteral(
-        "#verifyBanner { background:#fff2f0; border:2px solid #d32020; border-radius:4px; }"));
+    m_verifyBanner->setStyleSheet(
+        QStringLiteral("#verifyBanner { background:%1; border:2px solid %2; border-radius:4px; }")
+            .arg(theme::bannerBackground().name(), theme::dangerText().name()));
     auto *bannerLayout = new QVBoxLayout(m_verifyBanner);
     bannerLayout->setContentsMargins(12, 8, 12, 8);
     bannerLayout->setSpacing(2);
@@ -681,7 +704,10 @@ QWidget *MainWindow::buildChartPanel()
     bannerFont.setPointSizeF(qMax(14.0, bannerFont.pointSizeF() + 8.0));
     bannerFont.setBold(true);
     m_verifyBannerLabel->setFont(bannerFont);
-    m_verifyBannerLabel->setStyleSheet(QStringLiteral("color:#d32020; border:none;"));
+    m_verifyBannerLabel->setProperty("themeTone", QStringLiteral("danger"));
+    m_verifyBannerLabel->setProperty("themeExtra", QStringLiteral("border:none;"));
+    m_verifyBannerLabel->setStyleSheet(
+        QStringLiteral("color:%1; border:none;").arg(theme::dangerText().name()));
 
     // 只留一句结论。不摆 fio 原话（偏移量在日志里有逐处明细）：
     // 告警条要的是"这块盘坏了，赶紧备份换盘"，不是让人在这里读日志。
@@ -690,7 +716,10 @@ QWidget *MainWindow::buildChartPanel()
     QFont noteFont = bannerNote->font();
     noteFont.setPointSizeF(qMax(10.0, noteFont.pointSizeF() + 2.0));
     bannerNote->setFont(noteFont);
-    bannerNote->setStyleSheet(QStringLiteral("color:#8a1010; border:none;"));
+    bannerNote->setProperty("themeTone", QStringLiteral("bannerNote"));
+    bannerNote->setProperty("themeExtra", QStringLiteral("border:none;"));
+    bannerNote->setStyleSheet(
+        QStringLiteral("color:%1; border:none;").arg(theme::bannerNoteText().name()));
 
     bannerLayout->addWidget(m_verifyBannerLabel);
     bannerLayout->addWidget(bannerNote);
@@ -782,7 +811,9 @@ QWidget *MainWindow::buildChartPanel()
     QFont placeholderFont = placeholder->font();
     placeholderFont.setPointSizeF(qMax(12.0, placeholderFont.pointSizeF() + 6.0));
     placeholder->setFont(placeholderFont);
-    placeholder->setStyleSheet(QStringLiteral("color:#9a9a9a;"));
+    placeholder->setProperty("themeTone", QStringLiteral("muted"));
+    placeholder->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     m_chartStack->addWidget(placeholder);   // 下标 0
     m_chartStack->addWidget(m_chart);       // 下标 1
     m_chartStack->setCurrentIndex(0);
@@ -1066,9 +1097,7 @@ void MainWindow::applyDetectedIoEngine(const QString &fioPath)
         m_ioModeLabel->setText(buffered
                                    ? kIoModeBufferedFmt().arg(FioConfig::ioEngine())
                                    : kIoModeDirectFmt().arg(FioConfig::ioEngine()));
-        m_ioModeLabel->setStyleSheet(buffered
-                                         ? QStringLiteral("color:#b5750f; font-weight:bold;")
-                                         : QStringLiteral("color:#666;"));
+        updateIoModeLabelStyle();
     }
     // 只在这个状态**第一次**出现时写一行日志：这个函数每次改 fio 路径都会被
     // 防抖计时器调一次，无条件写会把日志刷满。
@@ -1259,6 +1288,8 @@ bool MainWindow::refreshDriveList(bool startup)
                                    : QStringLiteral("✗ ") + fs.unavailableReason);
             fsItem->setText(2, compactSizePair(fs.bytesUsed(), fs.bytesTotal));
             fsItem->setText(3, QStringLiteral("%1%").arg(fs.usedPercent(), 0, 'f', 1));
+            // 主题切换时要重算第 3 列的颜色，把使用率一起存进 item。
+            fsItem->setData(3, Qt::UserRole + 2, fs.usedPercent());
             fsItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
             fsItem->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
             fsItem->setData(0, Qt::UserRole, fs.suggestedDir);
@@ -1288,7 +1319,7 @@ bool MainWindow::refreshDriveList(bool startup)
                 // 测不了的分区照样列出来 —— 用户至少知道"它存在，为什么测不了"。
                 // 但灰掉且不可选，免得选中一个根本测不了的目标。
                 for (int column = 0; column < 4; ++column)
-                    fsItem->setForeground(column, QColor(150, 150, 150));
+                    fsItem->setForeground(column, theme::unavailableText());
                 fsItem->setFlags(fsItem->flags() & ~Qt::ItemIsSelectable);
                 continue;
             }
@@ -1296,9 +1327,9 @@ bool MainWindow::refreshDriveList(bool startup)
             ++selectableRows;
             const double percent = fs.usedPercent();
             if (percent >= 95.0)
-                fsItem->setForeground(3, QColor(200, 40, 40));
+                fsItem->setForeground(3, theme::usageCriticalText());
             else if (percent >= 85.0)
-                fsItem->setForeground(3, QColor(200, 130, 20));
+                fsItem->setForeground(3, theme::usageWarningText());
 
             // 目标目录落在哪个文件系统上就选哪一行。
             // 比的是 st_dev（同一个文件系统），所以 bind mount、btrfs 子卷
@@ -1366,7 +1397,8 @@ void MainWindow::refreshTargetInfo()
         // 三块都要清：条形本身不显示文字（setTextVisible(false)），
         // 空间和百分比是旁边两个标签，漏掉任何一个都会留着上一个盘的残留值。
         m_diskSpaceLabel->setText(kDiskSpaceUnselected());
-        m_diskSpaceLabel->setStyleSheet(QStringLiteral("color:#666;"));
+        m_diskSpaceLabel->setStyleSheet(
+            QStringLiteral("color:%1;").arg(theme::mutedText().name()));
         m_diskBarLabel->clear();
         return;
     }
@@ -1429,33 +1461,22 @@ void MainWindow::refreshDiskBar(quint64 total, quint64 free)
     const quint64 used = total > free ? total - free : 0;
     const double percent = double(used) * 100.0 / double(total);
 
-    // 按占用率换色，条形本身更显眼；读数放在条形右侧两列，右对齐、定宽
-    QString chunkColor;
-    QString textColor;
-    if (percent >= 95.0) {
-        chunkColor = QStringLiteral("#d9483c");
-        textColor = QStringLiteral("#c82828");
-    } else if (percent >= 85.0) {
-        chunkColor = QStringLiteral("#e8933a");
-        textColor = QStringLiteral("#b5750f");
-    } else if (percent >= 70.0) {
-        chunkColor = QStringLiteral("#e8c33a");
-        textColor = QStringLiteral("#8a6d00");
-    } else {
-        chunkColor = QStringLiteral("#3fa34d");
-        textColor = QStringLiteral("#2c7a37");
-    }
+    // 按占用率换色，条形本身更显眼；读数放在条形右侧两列，右对齐、定宽。
+    // 文字色在深色下要提亮（原来的深红/深绿在深底上几乎看不见）。
+    const QString chunkColor = theme::usageChunkColor(percent);
+    const QString textColor = theme::usageTextColor(percent).name();
 
     m_diskBar->setValue(int(percent * 10.0));
     m_diskBar->setStyleSheet(
-        QStringLiteral("QProgressBar { border:1px solid #b0b0b0; border-radius:4px;"
-                       " background:#ececec; }"
-                       "QProgressBar::chunk { background:%1; border-radius:3px; }")
-            .arg(chunkColor));
+        QStringLiteral("QProgressBar { border:1px solid %1; border-radius:4px;"
+                       " background:%2; }"
+                       "QProgressBar::chunk { background:%3; border-radius:3px; }")
+            .arg(theme::progressBorder().name(), theme::progressTrack().name(), chunkColor));
 
     m_diskSpaceLabel->setText(kDiskSpaceAvailable()
                                   .arg(formatBytes(free), formatBytes(total)));
-    m_diskSpaceLabel->setStyleSheet(QStringLiteral("color:#333;"));
+    m_diskSpaceLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::secondaryText().name()));
     m_diskBarLabel->setText(kDiskBarUsedPercent().arg(percent, 0, 'f', 1));
     m_diskBarLabel->setStyleSheet(QStringLiteral("color:%1;").arg(textColor));
 }
@@ -1468,6 +1489,81 @@ void MainWindow::updateDiskBarFor(const QString &root)
     quint64 free = 0;
     if (queryVolumeSpace(root, &total, &free))
         refreshDiskBar(total, free);
+}
+
+void MainWindow::updateIoModeLabelStyle()
+{
+    if (!m_ioModeLabel)
+        return;
+    const bool buffered = !FioConfig::directIo();
+    m_ioModeLabel->setStyleSheet(buffered
+                                     ? QStringLiteral("color:%1; font-weight:bold;")
+                                           .arg(theme::warningText().name())
+                                     : QStringLiteral("color:%1;")
+                                           .arg(theme::mutedText().name()));
+}
+
+void MainWindow::reapplyDriveTreeItemColors()
+{
+    if (!m_driveTree)
+        return;
+
+    for (int i = 0; i < m_driveTree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *disk = m_driveTree->topLevelItem(i);
+        if (!disk)
+            continue;
+        for (int j = 0; j < disk->childCount(); ++j) {
+            QTreeWidgetItem *fs = disk->child(j);
+            if (!fs)
+                continue;
+
+            if (!(fs->flags() & Qt::ItemIsSelectable)) {
+                for (int column = 0; column < 4; ++column)
+                    fs->setForeground(column, theme::unavailableText());
+                continue;
+            }
+
+            const double percent = fs->data(3, Qt::UserRole + 2).toDouble();
+            if (percent >= 95.0)
+                fs->setForeground(3, theme::usageCriticalText());
+            else if (percent >= 85.0)
+                fs->setForeground(3, theme::usageWarningText());
+            else
+                fs->setForeground(3, QBrush());   // 恢复成视图默认文字色
+        }
+    }
+}
+
+void MainWindow::applyTheme()
+{
+    // 1) 所有带 themeTone 的标签（卡片标题/数字、提示、告警文字、提权标签…）。
+    theme::restyleLabels(this);
+
+    // 2) 校验失败告警条：底色和边框不是单纯的文字色，单独重套。
+    if (m_verifyBanner) {
+        m_verifyBanner->setStyleSheet(
+            QStringLiteral("#verifyBanner { background:%1; border:2px solid %2; border-radius:4px; }")
+                .arg(theme::bannerBackground().name(), theme::dangerText().name()));
+    }
+
+    // 3) 驱动器列表：选中色 + 行内写死的使用率/不可测颜色。
+    if (m_driveTree) {
+        m_driveTree->setStyleSheet(theme::driveTreeStyleSheet());
+        reapplyDriveTreeItemColors();
+    }
+
+    // 4) IO 方式、目标磁盘/进度条、状态卡：这些颜色是按当前状态算的。
+    updateIoModeLabelStyle();
+    refreshTargetInfo();
+    updateStateLabel();
+
+    // 5) 日志是带颜色的 HTML，必须按新颜色整体重放。
+    rebuildLogView();
+
+    // 6) 性能结果格子的底色/文字色是在 paintEvent 里按当前主题现算的，
+    //    这里只要触发一次重绘。
+    for (PerfCell *cell : findChildren<PerfCell *>())
+        cell->update();
 }
 
 void MainWindow::updateReadAvailability()
@@ -3821,20 +3917,20 @@ void MainWindow::updateStateLabel()
     switch (m_phase) {
     case Phase::Preparing:
         text = kStatePreparing();
-        color = QStringLiteral("#c87f0a");
+        color = theme::warningText().name();
         break;
     case Phase::Writing:
         text = kStateWriting();
-        color = QStringLiteral("#1e46dc");
+        color = theme::writeValue().name();
         break;
     case Phase::Reading:
         text = kStateReading();
-        color = QStringLiteral("#dc1e1e");
+        color = theme::readValue().name();
         break;
     case Phase::Idle:
     default:
         text = kStateStopped();
-        color = QStringLiteral("#3c3c3c");
+        color = theme::neutralValue().name();
         break;
     }
 
@@ -3858,14 +3954,36 @@ void MainWindow::logEvent(const QString &text, bool isProblem)
     const QString stamp = QDateTime::currentDateTime()
                               .toString(QStringLiteral("yyyy.MM.dd HH:mm:ss"));
     if (m_logView) {
-        const QString color = isProblem ? QStringLiteral("#c81e1e")
-                                        : QStringLiteral("#222222");
-        m_logView->appendHtml(QStringLiteral("<span style='color:%1;'>%2&nbsp;&nbsp;%3</span>")
-                                  .arg(color, stamp, text.toHtmlEscaped()));
+        m_logEntries.append({stamp, text, isProblem});
+        // 视图本身限制 2000 个 block，原始记录也压到同一个上限，
+        // 否则切主题重放时会把已经被挤掉的旧行又画回来。
+        if (m_logEntries.size() > 2000)
+            m_logEntries.remove(0, m_logEntries.size() - 2000);
+        appendLogEntry(stamp, text, isProblem);
         m_logView->verticalScrollBar()->setValue(m_logView->verticalScrollBar()->maximum());
     }
     // 同时进诊断输出，保存出来时也带着时间线
     recordOutput(QStringLiteral("[%1] %2").arg(stamp, text));
+}
+
+void MainWindow::appendLogEntry(const QString &stamp, const QString &text, bool isProblem)
+{
+    if (!m_logView)
+        return;
+    const QString color = isProblem ? theme::dangerText().name()
+                                    : theme::secondaryText().name();
+    m_logView->appendHtml(QStringLiteral("<span style='color:%1;'>%2&nbsp;&nbsp;%3</span>")
+                              .arg(color, stamp, text.toHtmlEscaped()));
+}
+
+void MainWindow::rebuildLogView()
+{
+    if (!m_logView)
+        return;
+    m_logView->clear();
+    for (const LogEntry &entry : m_logEntries)
+        appendLogEntry(entry.stamp, entry.text, entry.isProblem);
+    m_logView->verticalScrollBar()->setValue(m_logView->verticalScrollBar()->maximum());
 }
 
 void MainWindow::reportProblem(const QString &title, const QString &text, bool critical)

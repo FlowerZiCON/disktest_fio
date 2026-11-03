@@ -149,6 +149,10 @@ private:
 
     void buildUi();
     void buildMenu();
+    /// 系统深浅色切换后，把本窗口里写死的颜色重新套一遍。
+    /// 只改样式表不够：卡片数字、列表行、进度条、日志 HTML 都是建窗口时
+    /// 按当时的主题算好的，必须逐项重算。
+    void applyTheme();
     /// 「帮助 → 语言」：存下选择并**重启程序**。
     ///
     /// 不做原地重译：界面文案是搭窗口时取的，原地换语言要么把整个窗口拆了
@@ -252,6 +256,14 @@ private:
     bool clearTestFiles(const QString &folder, QString *error);
     bool ensureTestFolder(const QString &folder, QString *error);
     void updateDiskBarFor(const QString &root);
+    /// 「IO 方式」那行的颜色依赖当前引擎是否支持直接 I/O，切换主题/探测引擎后
+    /// 都要重套一次。
+    void updateIoModeLabelStyle();
+    /// 主题切换后重刷驱动器树里写死的行文字色（不可测、使用率过高）。
+    void reapplyDriveTreeItemColors();
+    /// 运行日志是按 HTML 颜色写进 QPlainTextEdit 的；切换主题时用新颜色重放。
+    void rebuildLogView();
+    void appendLogEntry(const QString &stamp, const QString &text, bool isProblem);
 
     QString locateFioExecutable() const;
 
@@ -448,6 +460,15 @@ private:
     /// 每个采样点属于哪些方向：bit0=有读、bit1=有写（保存 CSV 时要带上）
     QVector<quint8> m_sampleFlags;
     QStringList     m_logLines;
+    struct LogEntry
+    {
+        QString stamp;
+        QString text;
+        bool    isProblem = false;
+    };
+    /// 运行日志的原始内容。QPlainTextEdit 里存的是带颜色的 HTML，主题切换时
+    /// 不能只靠改控件样式把旧颜色覆盖掉，所以另留一份纯文本 + 是否出错。
+    QVector<LogEntry> m_logEntries;
     QStringList     m_observedStates;
     QString         m_lastError;
     QStringList     m_diskSummary;   ///< 最近一次枚举到的磁盘/分区，写进自检报告便于排查

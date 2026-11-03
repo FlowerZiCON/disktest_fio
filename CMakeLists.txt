@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(disktest
-    VERSION 3.1.0
+    VERSION 3.1.1
     DESCRIPTION "Qt + fio disk reliability and performance tester GUI"
     LANGUAGES CXX)
 
@@ -47,6 +47,9 @@ add_executable(disktest WIN32
     # 界面语言：简体中文 / 繁體中文 / English，见 src/i18n.h
     src/i18n.h
     src/i18n.cpp
+    # 深浅色主题：统一判断与配色，深色下补原生样式漏掉的控件
+    src/theme.h
+    src/theme.cpp
     src/uitext.h
     src/uitext.def
     src/fioconfig.h

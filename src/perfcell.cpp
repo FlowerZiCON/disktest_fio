@@ -12,6 +12,7 @@
 
 #include "perfcell.h"
 
+#include "theme.h"
 #include "uitext.h"
 
 #include <QFont>
@@ -23,8 +24,8 @@
 namespace {
 const QColor kBarTop(0x9d, 0xe0, 0x6a);      // 绿色渐变的上端
 const QColor kBarBottom(0x6c, 0xc9, 0x3a);   // 下端
-const QColor kBorder(0x9a, 0x9a, 0x9a);
-const QColor kText(0x1a, 0x1a, 0x1a);
+const QColor kBorderLight(0x9a, 0x9a, 0x9a);
+const QColor kTextLight(0x1a, 0x1a, 0x1a);
 } // namespace
 
 PerfCell::PerfCell(QWidget *parent)
@@ -88,9 +89,14 @@ void PerfCell::paintEvent(QPaintEvent *event)
 
     const QRectF box = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
 
-    // 白底
-    painter.setPen(QPen(kBorder, 1.0));
-    painter.setBrush(Qt::white);
+    // 深色下不能再用白底黑字：格子会变成一块刺眼的白板。
+    const bool dark = theme::isDark();
+    const QColor border = dark ? QColor(0x5a, 0x5a, 0x5a) : kBorderLight;
+    const QColor textColor = dark ? QColor(0xe8, 0xe8, 0xe8) : kTextLight;
+
+    // 白底（浅色）/ 深灰底（深色）
+    painter.setPen(QPen(border, 1.0));
+    painter.setBrush(dark ? QColor(0x2d, 0x2d, 0x2d) : QColor(Qt::white));
     painter.drawRoundedRect(box, 3.0, 3.0);
 
     // 绿色条：按 值/满量程 的比例
@@ -113,7 +119,7 @@ void PerfCell::paintEvent(QPaintEvent *event)
     font.setPointSizeF(qMax(13.0, font.pointSizeF() + 7.0));
     font.setBold(true);
     painter.setFont(font);
-    painter.setPen(kText);
+    painter.setPen(textColor);
 
     const QString text = m_value >= 0.0
                              ? QString::number(m_value, 'f', 2)

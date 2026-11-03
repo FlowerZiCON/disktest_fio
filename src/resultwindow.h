@@ -52,6 +52,8 @@ public:
 private:
     explicit ResultWindow(const RunData &data, QWidget *parent = nullptr);
 
+    /// 系统运行中切换深浅色：把本窗口里写死的文字色/告警底色重新套一遍。
+    void applyTheme();
     void rebuildReliabilityChart();
     /// 图表上方的「绘图方式 / 密度」一行。和主界面同一套控件 ——
     /// 主界面能切的东西，回看窗口也应该能切，否则同一份数据在两个地方
@@ -74,6 +76,8 @@ private:
     QVector<RunData::Trace> m_traces;
     SpeedChart *m_chart     = nullptr;
     QLabel     *m_hintLabel = nullptr;
+    /// 校验失败告警条：底色/边框要随主题重算，留一个指针。
+    QLabel     *m_verifyLabel = nullptr;
     /// 图表下方的备注（文件里有 note 才建）。**只读**：回看窗口改了也存不回去，
     /// 能编辑只会让人以为改动会被保留。
     QLineEdit  *m_noteEdit  = nullptr;

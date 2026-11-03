@@ -15,6 +15,7 @@
 #include "fioconfig.h"
 #include "perfcell.h"
 #include "speedchart.h"
+#include "theme.h"
 #include "uitext.h"
 
 #include <QButtonGroup>
@@ -73,14 +74,18 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     // 老文件没有 test_mode：明确说一句，免得用户以为程序读错了模式
     if (!m_data.modeExplicit) {
         auto *legacy = new QLabel(kResultLegacyModeNote(), this);
-        legacy->setStyleSheet(QStringLiteral("color:#8a6d00;"));
+        legacy->setProperty("themeTone", QStringLiteral("warning"));
+        legacy->setStyleSheet(
+            QStringLiteral("color:%1;").arg(theme::warningText().name()));
         root->addWidget(legacy);
     }
 
     auto *sourceLabel = new QLabel(
         kResultSourceFmt().arg(QDir::toNativeSeparators(
             QFileInfo(m_data.path).absoluteFilePath())), this);
-    sourceLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    sourceLabel->setProperty("themeTone", QStringLiteral("muted"));
+    sourceLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     sourceLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     root->addWidget(sourceLabel);
 
@@ -169,7 +174,9 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         for (int k = 0; k < rowEntries.size(); ++k) {
             const int column = k * 2;
             auto *titleLabel = new QLabel(rowEntries.at(k).first, infoBox);
-            titleLabel->setStyleSheet(QStringLiteral("color:#666;"));
+            titleLabel->setProperty("themeTone", QStringLiteral("muted"));
+            titleLabel->setStyleSheet(
+                QStringLiteral("color:%1;").arg(theme::mutedText().name()));
             auto *valueLabel = new QLabel(rowEntries.at(k).second.isEmpty()
                                               ? kTextNone()
                                               : rowEntries.at(k).second,
@@ -201,12 +208,14 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
             verifyNote = kVerifyCountUnreadableNote();
         }
         auto *verifyLabel = new QLabel(this);
+        m_verifyLabel = verifyLabel;
         verifyLabel->setText(verifyText + QLatin1Char('\n') + verifyNote);
         verifyLabel->setWordWrap(true);
         verifyLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         verifyLabel->setStyleSheet(
-            QStringLiteral("color:#d32020; font-weight:bold; border:2px solid #d32020;"
-                           " border-radius:4px; padding:6px; background:#fff2f0;"));
+            QStringLiteral("color:%1; font-weight:bold; border:2px solid %1;"
+                           " border-radius:4px; padding:6px; background:%2;")
+                .arg(theme::dangerText().name(), theme::bannerBackground().name()));
         root->addWidget(verifyLabel);
     }
 
@@ -214,7 +223,9 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
     // 静默少画几个点，用户会拿一条缺口的曲线当成真实曲线。
     if (m_data.droppedSampleCount() > 0) {
         auto *skipped = new QLabel(kStatusSkippedLines().arg(m_data.droppedSampleCount()), this);
-        skipped->setStyleSheet(QStringLiteral("color:#8a6d00;"));
+        skipped->setProperty("themeTone", QStringLiteral("warning"));
+        skipped->setStyleSheet(
+            QStringLiteral("color:%1;").arg(theme::warningText().name()));
         skipped->setWordWrap(true);
         root->addWidget(skipped);
     }
@@ -248,7 +259,9 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         buildPerfTable(root);
 
     m_hintLabel = new QLabel(perf ? kResultPerfHint() : kResultReliabilityHint(), this);
-    m_hintLabel->setStyleSheet(QStringLiteral("color:#666;"));
+    m_hintLabel->setProperty("themeTone", QStringLiteral("muted"));
+    m_hintLabel->setStyleSheet(
+        QStringLiteral("color:%1;").arg(theme::mutedText().name()));
     m_hintLabel->setWordWrap(true);
     root->addWidget(m_hintLabel);
 
@@ -282,6 +295,25 @@ ResultWindow::ResultWindow(const RunData &data, QWidget *parent)
         if (x >= 0.0)
             m_chart->addVerifyMarker(x);
     }
+
+    // 运行中切换系统深浅色：本窗口的摘要文字、告警条和性能格子一起重刷。
+    connect(theme::ThemeNotifier::instance(), &theme::ThemeNotifier::changed,
+            this, &ResultWindow::applyTheme);
+}
+
+void ResultWindow::applyTheme()
+{
+    theme::restyleLabels(this);
+
+    if (m_verifyLabel) {
+        m_verifyLabel->setStyleSheet(
+            QStringLiteral("color:%1; font-weight:bold; border:2px solid %1;"
+                           " border-radius:4px; padding:6px; background:%2;")
+                .arg(theme::dangerText().name(), theme::bannerBackground().name()));
+    }
+
+    for (PerfCell *cell : findChildren<PerfCell *>())
+        cell->update();
 }
 
 void ResultWindow::rebuildReliabilityChart()

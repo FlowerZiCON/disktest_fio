@@ -14,6 +14,7 @@
 
 #include "i18n.h"
 #include "rundata.h"
+#include "theme.h"
 #include "uitext.h"
 
 #include <QApplication>
@@ -31,6 +32,12 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("disktest"));
+
+    // 深色模式下补一份应用级样式表：Qt 6.8 的 Windows 11 原生样式仍会把
+    // QPushButton / QTreeView 画成浅色底（见 theme.cpp 的说明）。必须在建
+    // 窗口之前调用，之后创建的结果窗口、消息框也会一起生效。
+    // 浅色模式不做任何事，外观与以前完全一致。
+    theme::apply(&app);
 
     // 版本号只有 CMakeLists.txt 的 project(... VERSION) 一个来源，
     // 别在这里写死——写死就会出现"标题栏 2.2.7、--version 输出 2.0.0"这种不一致。
